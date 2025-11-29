@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AppController } from './app.controller';
+import { AppService } from './app.service';
 import { AuthModule } from './auth/auth.module';
 import { UsersModule } from './users/users.module';
 import { StoresModule } from './stores/stores.module';
@@ -10,9 +12,7 @@ import { JobsModule } from './jobs/jobs.module';
 
 @Module({
 	imports: [
-		ConfigModule.forRoot({
-			isGlobal: true,
-		}),
+		ConfigModule.forRoot({ isGlobal: true }),
 		MongooseModule.forRootAsync({
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => ({
@@ -26,5 +26,7 @@ import { JobsModule } from './jobs/jobs.module';
 		MetricsModule,
 		JobsModule,
 	],
+	controllers: [AppController],
+	providers: [AppService],
 })
 export class AppModule {}
