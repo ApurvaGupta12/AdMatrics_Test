@@ -51,35 +51,36 @@ export class ShopifyService {
 			`Fetching Shopify orders for ${store.name} (${store.shopifyStoreUrl}) from ${from.toISOString()} to ${to.toISOString()}`,
 		);
 
+		const queryString = `created_at:>='${from.toISOString()}' AND created_at:<='${to.toISOString()}'`;
+
 		const query = `
-      query getOrders($cursor: String, $from: DateTime, $to: DateTime) {
-        orders(first: 100, after: $cursor, query: "created_at:>='$from' AND created_at:<='$to'") {
-          edges {
-            cursor
-            node {
-              id
-              createdAt
-              totalPriceSet { shopMoney { amount } }
-              lineItems(first: 100) {
-                edges {
-                  node {
-                    quantity
-                  }
-                }
-              }
-            }
-          }
-          pageInfo {
-            hasNextPage
-          }
-        }
-      }
-    `;
+			query getOrders($cursor: String, $queryString: String!) {
+				orders(first: 100, after: $cursor, query: $queryString) {
+					edges {
+						cursor
+						node {
+							id
+							createdAt
+							totalPriceSet { shopMoney { amount } }
+							lineItems(first: 100) {
+								edges {
+									node {
+										quantity
+									}
+								}
+							}
+						}
+					}
+					pageInfo {
+						hasNextPage
+					}
+				}
+			}
+		`;
 
 		let cursor: string | null = null;
 		let hasNextPage = true;
 
-		// Aggregated totals
 		let soldOrders = 0;
 		let orderValue = 0;
 		let soldItems = 0;
@@ -87,8 +88,7 @@ export class ShopifyService {
 		while (hasNextPage) {
 			const data = await this.callShopify(store, query, {
 				cursor,
-				from: from.toISOString(),
-				to: to.toISOString(),
+				queryString,
 			});
 
 			const orders = data.orders.edges;

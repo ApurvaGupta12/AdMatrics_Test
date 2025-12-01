@@ -36,7 +36,7 @@ export class FacebookService {
 	}
 
 	async fetchAdSpend(store: Store, from: Date, to: Date): Promise<number> {
-		const token = this.config.get<string>('FB_ACCESS_TOKEN');
+		const token = store.fbAdSpendToken; // e.g. EAAGm0PX4ZCpsBAKZCZCZCZA...
 		const adAccountId = store.fbAccountId; // e.g. act_123456789
 
 		const url = `https://graph.facebook.com/v19.0/${adAccountId}/insights`;
