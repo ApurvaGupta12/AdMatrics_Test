@@ -2,7 +2,8 @@ import { Injectable, Logger } from '@nestjs/common';
 import axios, { AxiosError } from 'axios';
 import { Store } from '../../stores/schemas/store.schema';
 
-interface ShopifyOrdersSummary {
+interface DailyOrdersSummary {
+	date: string;
 	soldOrders: number;
 	orderValue: number;
 	soldItems: number;
@@ -11,6 +12,7 @@ interface ShopifyOrdersSummary {
 @Injectable()
 export class ShopifyService {
 	private readonly logger = new Logger(ShopifyService.name);
+	private readonly DELAY_BETWEEN_DAYS_MS = 100;
 
 	private async callShopify(store: Store, query: string, variables: any) {
 		const url = `https://${store.shopifyStoreUrl}/admin/api/2024-01/graphql.json`;
@@ -42,78 +44,117 @@ export class ShopifyService {
 		}
 	}
 
-	async fetchOrders(
-		store: Store,
-		from: Date,
-		to: Date,
-	): Promise<ShopifyOrdersSummary> {
-		this.logger.log(
-			`Fetching Shopify orders for ${store.name} (${store.shopifyStoreUrl}) from ${from.toISOString()} to ${to.toISOString()}`,
-		);
-
-		const queryString = `created_at:>='${from.toISOString()}' AND created_at:<='${to.toISOString()}'`;
-
-		const query = `
+	private getOrdersQuery(): string {
+		return `
 			query getOrders($cursor: String, $queryString: String!) {
 				orders(first: 100, after: $cursor, query: $queryString) {
 					edges {
 						cursor
 						node {
 							id
-							createdAt
 							totalPriceSet { shopMoney { amount } }
 							lineItems(first: 100) {
 								edges {
-									node {
-										quantity
-									}
+									node { quantity }
 								}
 							}
 						}
 					}
-					pageInfo {
-						hasNextPage
-					}
+					pageInfo { hasNextPage }
 				}
 			}
 		`;
+	}
 
-		let cursor: string | null = null;
-		let hasNextPage = true;
+	private async sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
+	}
 
-		let soldOrders = 0;
-		let orderValue = 0;
-		let soldItems = 0;
+	async fetchOrders(
+		store: Store,
+		from: Date,
+		to: Date,
+	): Promise<DailyOrdersSummary[]> {
+		const results: DailyOrdersSummary[] = [];
+		const currentDate = new Date(from);
+		let dayCount = 0;
 
-		while (hasNextPage) {
-			const data = await this.callShopify(store, query, {
-				cursor,
-				queryString,
-			});
+		const totalDays =
+			Math.ceil((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24)) +
+			1;
 
-			const orders = data.orders.edges;
+		this.logger.log(
+			`Fetching Shopify orders for ${store.name}: ${from.toISOString().slice(0, 10)} to ${to.toISOString().slice(0, 10)} (${totalDays} days)`,
+		);
 
-			for (const order of orders) {
-				soldOrders++;
-				const price = parseFloat(
-					order.node.totalPriceSet.shopMoney.amount || '0',
+		while (currentDate <= to) {
+			const dayStart = new Date(currentDate);
+			dayStart.setHours(0, 0, 0, 0);
+
+			const dayEnd = new Date(currentDate);
+			dayEnd.setHours(23, 59, 59, 999);
+
+			const queryString = `created_at:>='${dayStart.toISOString()}' AND created_at:<='${dayEnd.toISOString()}'`;
+
+			let cursor: string | null = null;
+			let hasNextPage = true;
+			let soldOrders = 0;
+			let orderValue = 0;
+			let soldItems = 0;
+
+			while (hasNextPage) {
+				const data = await this.callShopify(
+					store,
+					this.getOrdersQuery(),
+					{
+						cursor,
+						queryString,
+					},
 				);
-				orderValue += price;
 
-				const items = order.node.lineItems.edges;
-				for (const item of items) {
-					soldItems += item.node.quantity;
+				const orders = data.orders.edges;
+
+				for (const order of orders) {
+					soldOrders++;
+					orderValue += parseFloat(
+						order.node.totalPriceSet.shopMoney.amount || '0',
+					);
+
+					for (const item of order.node.lineItems.edges) {
+						soldItems += item.node.quantity;
+					}
 				}
+
+				hasNextPage = data.orders.pageInfo.hasNextPage;
+				cursor = hasNextPage ? orders[orders.length - 1].cursor : null;
 			}
 
-			hasNextPage = data.orders.pageInfo.hasNextPage;
-			cursor = hasNextPage ? orders[orders.length - 1].cursor : null;
+			results.push({
+				date: currentDate.toISOString().slice(0, 10),
+				soldOrders,
+				orderValue,
+				soldItems,
+			});
+
+			dayCount++;
+			if (dayCount % 10 === 0) {
+				this.logger.log(
+					`Progress: ${dayCount}/${totalDays} days processed for ${store.name}`,
+				);
+			}
+
+			// Rate limiting delay for multi-day requests
+			if (totalDays > 1 && currentDate < to) {
+				await this.sleep(this.DELAY_BETWEEN_DAYS_MS);
+			}
+
+			currentDate.setDate(currentDate.getDate() + 1);
 		}
 
-		return {
-			soldOrders,
-			orderValue,
-			soldItems,
-		};
+		this.logger.log(
+			`✓ Retrieved ${results.length} days of orders for ${store.name}`,
+		);
+
+		return results;
 	}
 }

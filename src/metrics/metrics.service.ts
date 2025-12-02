@@ -62,12 +62,21 @@ export class MetricsService {
 			return filter;
 		}
 
-		if (range === 'last7days' || range === 'last30days') {
-			const days = range === 'last7days' ? 7 : 30;
-			const from = new Date();
-			from.setDate(from.getDate() - days);
-			from.setHours(0, 0, 0, 0);
-			filter.date = { $gte: from };
+		if (range) {
+			const daysMap: { [key: string]: number } = {
+				last7days: 7,
+				last14days: 14,
+				last30days: 30,
+				last60days: 60,
+				last90days: 90,
+			};
+			const days = daysMap[range];
+			if (days) {
+				const from = new Date();
+				from.setDate(from.getDate() - days);
+				from.setHours(0, 0, 0, 0);
+				filter.date = { $gte: from };
+			}
 		}
 
 		return filter;

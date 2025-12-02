@@ -1,4 +1,13 @@
-import { Controller, Get, Query, Param, Post, UseGuards } from '@nestjs/common';
+import {
+	Controller,
+	Get,
+	Query,
+	Param,
+	Post,
+	UseGuards,
+	Logger,
+	Body,
+} from '@nestjs/common';
 import {
 	ApiTags,
 	ApiOperation,
@@ -6,6 +15,7 @@ import {
 	ApiBearerAuth,
 	ApiParam,
 	ApiQuery,
+	ApiBody,
 } from '@nestjs/swagger';
 import { MetricsService } from './metrics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -22,6 +32,8 @@ import { GoogleService } from '../integrations/google/google.service';
 @Controller()
 @UseGuards(JwtAuthGuard, RolesGuard)
 export class MetricsController {
+	private readonly logger = new Logger(MetricsController.name);
+
 	constructor(
 		private readonly metricsService: MetricsService,
 		private readonly storesService: StoresService,
@@ -36,7 +48,13 @@ export class MetricsController {
 	@ApiQuery({
 		name: 'range',
 		required: false,
-		enum: ['last7days', 'last30days'],
+		enum: [
+			'last7days',
+			'last14days',
+			'last30days',
+			'last60days',
+			'last90days',
+		],
 		description: 'Predefined date range',
 	})
 	@ApiQuery({
@@ -82,52 +100,219 @@ export class MetricsController {
 		return this.metricsService.aggregate(range || 'last30days');
 	}
 
-	@Post('metrics/sync/:storeId')
+	@Post('metrics/sync/:storeId/daily')
 	@Roles(UserRole.ADMIN, UserRole.MANAGER)
 	@ApiOperation({
 		summary:
-			'Manually trigger metrics sync for a store (Admin/Manager only)',
+			"Sync yesterday's metrics for a single store (Admin/Manager only)",
 	})
 	@ApiParam({ name: 'storeId', description: 'Store ID' })
-	@ApiResponse({ status: 200, description: 'Sync initiated successfully' })
+	@ApiResponse({
+		status: 200,
+		description: 'Daily sync completed successfully',
+	})
 	@ApiResponse({ status: 403, description: 'Forbidden' })
 	@ApiResponse({ status: 404, description: 'Store not found' })
-	async manualSync(@Param('storeId') storeId: string) {
+	async dailySync(@Param('storeId') storeId: string) {
 		const store = await this.storesService.findOne(storeId);
 
-		const date = new Date();
-		date.setDate(date.getDate() - 1);
-		date.setHours(0, 0, 0, 0);
+		const yesterday = new Date();
+		yesterday.setDate(yesterday.getDate() - 1);
+		yesterday.setHours(0, 0, 0, 0);
 
-		const shopifyData = await this.shopifyService.fetchOrders(
-			store,
-			date,
-			date,
-		);
-		const fbSpend = await this.facebookService.fetchAdSpend(
-			store,
-			date,
-			date,
-		);
-		const googleSpend = await this.googleService.fetchAdSpend(
-			store,
-			date,
-			date,
-		);
+		this.logger.log(`Starting daily sync for store: ${store.name}`);
 
-		await this.metricsService.createOrUpdate({
-			storeId: store._id,
-			date,
-			facebookMetaSpend: fbSpend,
-			googleAdSpend: googleSpend,
-			shopifySoldOrders: shopifyData.soldOrders,
-			shopifyOrderValue: shopifyData.orderValue,
-			shopifySoldItems: shopifyData.soldItems,
-		});
+		const [shopifyData, fbData, googleSpend] = await Promise.all([
+			this.shopifyService.fetchOrders(store, yesterday, yesterday),
+			this.facebookService.fetchAdSpend(store, yesterday, yesterday),
+			this.googleService.fetchAdSpend(store, yesterday, yesterday),
+		]);
+
+		const metricsByDate = new Map<string, any>();
+
+		const getOrCreateEntry = (dateStr: string) => {
+			if (!metricsByDate.has(dateStr)) {
+				metricsByDate.set(dateStr, {
+					storeId: store._id,
+					date: new Date(dateStr),
+					facebookMetaSpend: 0,
+					googleAdSpend: 0,
+					shopifySoldOrders: 0,
+					shopifyOrderValue: 0,
+					shopifySoldItems: 0,
+				});
+			}
+			return metricsByDate.get(dateStr);
+		};
+
+		// Process Shopify
+		if (Array.isArray(shopifyData)) {
+			shopifyData.forEach((row) => {
+				const entry = getOrCreateEntry(row.date);
+				entry.shopifySoldOrders = row.soldOrders;
+				entry.shopifyOrderValue = row.orderValue;
+				entry.shopifySoldItems = row.soldItems;
+			});
+		}
+
+		// Process Facebook
+		if (Array.isArray(fbData)) {
+			fbData.forEach((row) => {
+				const entry = getOrCreateEntry(row.date);
+				entry.facebookMetaSpend = row.spend;
+			});
+		}
+
+		// Process Google
+		if (Array.isArray(googleSpend)) {
+			googleSpend.forEach((row) => {
+				const entry = getOrCreateEntry(row.date);
+				entry.googleAdSpend = row.spend;
+			});
+		} else if (typeof googleSpend === 'number') {
+			const dateStr = yesterday.toISOString().slice(0, 10);
+			const entry = getOrCreateEntry(dateStr);
+			entry.googleAdSpend = googleSpend;
+		}
+
+		let processedCount = 0;
+		for (const metric of metricsByDate.values()) {
+			await this.metricsService.createOrUpdate(metric);
+			processedCount++;
+		}
+
+		this.logger.log(
+			`Daily sync completed. Updated ${processedCount} day(s).`,
+		);
 
 		return {
-			message: `Sync initiated for store: ${store.name}`,
-			jobId: `manual-${Date.now()}`,
+			message: `Daily sync completed for store: ${store.name}`,
+			date: yesterday.toISOString().slice(0, 10),
+			daysProcessed: processedCount,
+		};
+	}
+
+	@Post('metrics/sync/:storeId/range')
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({
+		summary: 'Backfill historical metrics for a date range (Admin only)',
+	})
+	@ApiParam({ name: 'storeId', description: 'Store ID' })
+	@ApiBody({
+		schema: {
+			type: 'object',
+			properties: {
+				startDate: { type: 'string', example: '2024-11-01' },
+				endDate: { type: 'string', example: '2025-11-30' },
+			},
+			required: ['startDate', 'endDate'],
+		},
+	})
+	@ApiResponse({
+		status: 200,
+		description: 'Range sync completed successfully',
+	})
+	@ApiResponse({ status: 400, description: 'Invalid date range' })
+	@ApiResponse({ status: 403, description: 'Forbidden' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
+	async rangeSync(
+		@Param('storeId') storeId: string,
+		@Body('startDate') startDate: string,
+		@Body('endDate') endDate: string,
+	) {
+		const store = await this.storesService.findOne(storeId);
+
+		const from = new Date(startDate);
+		const to = new Date(endDate);
+
+		// Validation
+		if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+			return {
+				error: 'Invalid date format. Use YYYY-MM-DD',
+				status: 400,
+			};
+		}
+
+		if (from > to) {
+			return {
+				error: 'startDate must be before endDate',
+				status: 400,
+			};
+		}
+
+		const daysDiff = Math.ceil(
+			(to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24),
+		);
+
+		this.logger.warn(
+			`⚠️  RANGE SYNC INITIATED for ${store.name}: ${startDate} to ${endDate} (${daysDiff} days)`,
+		);
+
+		const [shopifyData, fbData, googleSpend] = await Promise.all([
+			this.shopifyService.fetchOrders(store, from, to),
+			this.facebookService.fetchAdSpend(store, from, to),
+			this.googleService.fetchAdSpend(store, from, to),
+		]);
+
+		const metricsByDate = new Map<string, any>();
+
+		const getOrCreateEntry = (dateStr: string) => {
+			if (!metricsByDate.has(dateStr)) {
+				metricsByDate.set(dateStr, {
+					storeId: store._id,
+					date: new Date(dateStr),
+					facebookMetaSpend: 0,
+					googleAdSpend: 0,
+					shopifySoldOrders: 0,
+					shopifyOrderValue: 0,
+					shopifySoldItems: 0,
+				});
+			}
+			return metricsByDate.get(dateStr);
+		};
+
+		// Process Shopify
+		if (Array.isArray(shopifyData)) {
+			shopifyData.forEach((row) => {
+				const entry = getOrCreateEntry(row.date);
+				entry.shopifySoldOrders = row.soldOrders;
+				entry.shopifyOrderValue = row.orderValue;
+				entry.shopifySoldItems = row.soldItems;
+			});
+		}
+
+		// Process Facebook
+		if (Array.isArray(fbData)) {
+			fbData.forEach((row) => {
+				const entry = getOrCreateEntry(row.date);
+				entry.facebookMetaSpend = row.spend;
+			});
+		}
+
+		// Process Google
+		if (Array.isArray(googleSpend)) {
+			googleSpend.forEach((row) => {
+				const entry = getOrCreateEntry(row.date);
+				entry.googleAdSpend = row.spend;
+			});
+		}
+
+		let processedCount = 0;
+		for (const metric of metricsByDate.values()) {
+			await this.metricsService.createOrUpdate(metric);
+			processedCount++;
+		}
+
+		this.logger.log(
+			`✓ Range sync completed. Updated ${processedCount} days for ${store.name}`,
+		);
+
+		return {
+			message: `Range sync completed for store: ${store.name}`,
+			startDate,
+			endDate,
+			daysProcessed: processedCount,
+			jobId: `range-${Date.now()}`,
 		};
 	}
 }

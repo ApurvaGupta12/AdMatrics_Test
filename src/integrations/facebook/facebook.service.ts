@@ -3,6 +3,11 @@ import axios, { AxiosError } from 'axios';
 import { Store } from '../../stores/schemas/store.schema';
 import { ConfigService } from '@nestjs/config';
 
+interface DailyAdSpend {
+	date: string;
+	spend: number;
+}
+
 @Injectable()
 export class FacebookService {
 	private readonly logger = new Logger(FacebookService.name);
@@ -21,7 +26,6 @@ export class FacebookService {
 			const err = error as AxiosError;
 			const errData = err.response?.data as any;
 
-			// Rate limit or temporary server issue → retry
 			if (errData?.error?.code === 17 && retry < 3) {
 				this.logger.warn(`FB rate limit hit, retrying in 2 sec...`);
 				await new Promise((res) => setTimeout(res, 2000));
@@ -35,15 +39,21 @@ export class FacebookService {
 		}
 	}
 
-	async fetchAdSpend(store: Store, from: Date, to: Date): Promise<number> {
-		const token = store.fbAdSpendToken; // e.g. EAAGm0PX4ZCpsBAKZCZCZCZA...
-		const adAccountId = store.fbAccountId; // e.g. act_123456789
+	async fetchAdSpend(
+		store: Store,
+		from: Date,
+		to: Date,
+	): Promise<DailyAdSpend[]> {
+		const token = store.fbAdSpendToken;
+		const adAccountId = store.fbAccountId;
 
 		const url = `https://graph.facebook.com/v19.0/${adAccountId}/insights`;
 
 		const params = {
 			access_token: token,
-			fields: 'spend',
+			fields: 'spend,date_start',
+			time_increment: 1,
+			limit: 500,
 			time_range: JSON.stringify({
 				since: from.toISOString().slice(0, 10),
 				until: to.toISOString().slice(0, 10),
@@ -51,16 +61,25 @@ export class FacebookService {
 		};
 
 		this.logger.log(
-			`FB Ads spend fetch for ${store.name} (${adAccountId}): ${params.time_range}`,
+			`Fetching FB ad spend for ${store.name}: ${params.time_range}`,
 		);
 
 		const data = await this.callFacebook(url, params);
 
 		if (!data || !data.data || data.data.length === 0) {
-			return 0;
+			this.logger.warn(`No ad spend data returned for ${store.name}`);
+			return [];
 		}
 
-		// FB returns spend as string
-		return parseFloat(data.data[0].spend || '0');
+		const dailySpend: DailyAdSpend[] = data.data.map((row: any) => ({
+			date: row.date_start,
+			spend: parseFloat(row.spend || '0'),
+		}));
+
+		this.logger.log(
+			`✓ Retrieved ${dailySpend.length} days of ad spend for ${store.name}`,
+		);
+
+		return dailySpend;
 	}
 }
