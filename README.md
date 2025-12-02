@@ -295,7 +295,7 @@ export class StoreMetric extends Document {
   date: Date;
 
   @Prop({ default: 0 })
-  facebookMetaSpend: number;
+  facebookMetaSpend: number; 
 
   @Prop({ default: 0 })
   googleAdSpend: number;
