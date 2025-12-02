@@ -93,6 +93,7 @@ export class AnalyticsController {
 				productId: p.productId,
 				productName: p.productName,
 				productImage: p.productImage,
+				productUrl: p.productUrl,
 				totalQuantitySold: p.totalQuantitySold,
 				totalRevenue: Math.round(p.totalRevenue * 100) / 100,
 				lastSyncDate: p.lastSyncDate,
@@ -162,15 +163,15 @@ export class AnalyticsController {
 				productId: product.productId,
 				productName: product.productName,
 				productImage: product.productImage,
+				productUrl: product.productUrl,
 				quantitySold: product.quantitySold,
 				revenue: product.revenue,
 			});
 			processedCount++;
 		}
 
-		this.logger.log(
-			`✓ Product analytics sync completed for ${store.name}. Processed ${processedCount} products.`,
-		);
+		this.logger.log(`✓ Product analytics sync completed for ${store.name}`);
+		this.logger.log(`Processed ${processedCount} products`);
 
 		return {
 			message: `Product analytics synced for store: ${store.name}`,

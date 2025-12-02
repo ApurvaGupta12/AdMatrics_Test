@@ -13,6 +13,7 @@ interface ProductSalesData {
 	productId: string;
 	productName: string;
 	productImage: string;
+	productUrl: string;
 	quantitySold: number;
 	revenue: number;
 }
@@ -68,6 +69,7 @@ export class ShopifyService {
 										product {
 											id
 											title
+											onlineStoreUrl
 											featuredImage {
 												url
 											}
@@ -225,9 +227,8 @@ export class ShopifyService {
 						productMap.set(productId, {
 							productId,
 							productName: product.title,
-							productImage:
-								product.featuredImage?.url ||
-								'https://via.placeholder.com/150',
+							productImage: product.featuredImage?.url || '',
+							productUrl: product.onlineStoreUrl || '',
 							quantitySold: 0,
 							revenue: 0,
 						});

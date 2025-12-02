@@ -8,6 +8,7 @@ export interface ProductSalesInput {
 	productId: string;
 	productName: string;
 	productImage: string;
+	productUrl: string;
 	quantitySold: number;
 	revenue: number;
 }
@@ -32,6 +33,7 @@ export class ProductMetricsService {
 					$set: {
 						productName: input.productName,
 						productImage: input.productImage,
+						productUrl: input.productUrl,
 						lastSyncDate: new Date(),
 					},
 					$inc: {

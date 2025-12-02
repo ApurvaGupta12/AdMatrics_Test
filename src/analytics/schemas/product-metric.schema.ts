@@ -15,6 +15,9 @@ export class ProductMetric extends Document {
 	@Prop({ required: true })
 	productImage: string;
 
+	@Prop({ required: false })
+	productUrl: string;
+
 	@Prop({ default: 0 })
 	totalQuantitySold: number;
 
