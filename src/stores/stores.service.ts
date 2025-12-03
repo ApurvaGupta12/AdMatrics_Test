@@ -31,13 +31,14 @@ export class StoresService {
 	}
 
 	async findAll(user?: any): Promise<Store[]> {
-		if (!user || user.role === UserRole.ADMIN) {
+		if (!user || user.role === 'ADMIN' || user.role === UserRole.ADMIN) {
 			return this.storeModel.find().exec();
 		}
 
 		const assigned = (user.assignedStores || []).map((id: any) =>
-			id.toString(),
+			id && id.toString ? id.toString() : String(id),
 		);
+
 		if (!assigned.length) return [];
 
 		return this.storeModel
@@ -55,7 +56,7 @@ export class StoresService {
 
 	async findOneForUser(id: string, user: any): Promise<Store> {
 		const store = await this.findOne(id);
-		if (user.role === UserRole.ADMIN) return store;
+		if (user.role === UserRole.ADMIN || user.role === 'ADMIN') return store;
 
 		if (!this.canAccessStore(user, id)) {
 			throw new ForbiddenException(
@@ -78,11 +79,11 @@ export class StoresService {
 		dto: UpdateStoreDto,
 		user: any,
 	): Promise<Store> {
-		if (user.role === UserRole.ADMIN) {
+		if (user.role === UserRole.ADMIN || user.role === 'ADMIN') {
 			return this.update(id, dto);
 		}
 
-		if (user.role === UserRole.MANAGER) {
+		if (user.role === UserRole.MANAGER || user.role === 'MANAGER') {
 			if (!this.canAccessStore(user, id)) {
 				throw new ForbiddenException(
 					'You do not have permission to update this store',
@@ -106,7 +107,7 @@ export class StoresService {
 	canAccessStore(user: any, storeId: string): boolean {
 		if (!user) return false;
 
-		if (user.role === UserRole.ADMIN) return true;
+		if (user.role === UserRole.ADMIN || user.role === 'ADMIN') return true;
 
 		const assigned = (user.assignedStores || []).map((id: any) =>
 			id && id.toString ? id.toString() : String(id),
@@ -116,6 +117,8 @@ export class StoresService {
 	}
 
 	canManageStoreAccess(user: any): boolean {
-		return [UserRole.ADMIN, UserRole.MANAGER].includes(user?.role);
+		return [UserRole.ADMIN, UserRole.MANAGER, 'ADMIN', 'MANAGER'].includes(
+			user?.role,
+		);
 	}
 }

@@ -14,9 +14,9 @@ export class StoreAccessGuard implements CanActivate {
 			(request.body && (request.body.storeId || request.body._id)) ||
 			(request.query && request.query.storeId);
 
-		if (!storeId) return true;
-
 		if (user && user.role === 'ADMIN') return true;
+
+		if (!storeId) return false;
 
 		return this.storesService.canAccessStore(user, storeId);
 	}

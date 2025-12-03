@@ -17,6 +17,7 @@ import {
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
+import { StoreAccessGuard } from '../auth/guards/store-access.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { StoresService } from '../stores/stores.service';
@@ -26,7 +27,7 @@ import { ProductMetricsService } from '../analytics/analytics.service';
 @ApiTags('Analytics')
 @ApiBearerAuth('JWT-auth')
 @Controller('analytics')
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, StoreAccessGuard)
 export class AnalyticsController {
 	private readonly logger = new Logger(AnalyticsController.name);
 

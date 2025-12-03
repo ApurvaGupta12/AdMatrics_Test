@@ -26,11 +26,12 @@ import { StoresService } from '../stores/stores.service';
 import { ShopifyService } from '../integrations/shopify/shopify.service';
 import { FacebookService } from '../integrations/facebook/facebook.service';
 import { GoogleService } from '../integrations/google/google.service';
+import { StoreAccessGuard } from '../auth/guards/store-access.guard';
 
 @ApiTags('Metrics')
 @ApiBearerAuth('JWT-auth')
 @Controller()
-@UseGuards(JwtAuthGuard, RolesGuard)
+@UseGuards(JwtAuthGuard, RolesGuard, StoreAccessGuard)
 export class MetricsController {
 	private readonly logger = new Logger(MetricsController.name);
 
