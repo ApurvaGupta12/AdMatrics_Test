@@ -26,27 +26,35 @@ export class AuthService {
 	}
 
 	async signup(dto: SignupDto) {
+		// Check if email already exists
 		const existing = await this.usersService.findByEmail(dto.email);
 		if (existing) {
 			throw new ConflictException('Email already in use');
 		}
 
-		const hashedPassword = await bcrypt.hash(dto.password, 12);
-		const role = dto.role ?? UserRole.VIEWER;
+		// Check if store name already exists
+		const existingStoreName = await this.usersService.findByStoreName(
+			dto.storeName,
+		);
+		if (existingStoreName) {
+			throw new ConflictException('Store name already in use');
+		}
 
+		// Hash password
+		const hashedPassword = await bcrypt.hash(dto.password, 12);
+
+		// Create user with MANAGER role and store info
 		const user = await this.usersService.create({
+			name: dto.name,
 			email: dto.email,
 			password: hashedPassword,
-			role,
+			role: UserRole.MANAGER,
+			storeName: dto.storeName,
+			storeUrl: dto.storeUrl,
 		});
 
-		// include assignedStores in the token
-		const token = await this.signToken(
-			user.id,
-			user.email,
-			user.role,
-			user.assignedStores ?? [],
-		);
+		// Generate token (no assigned stores yet)
+		const token = await this.signToken(user.id, user.email, user.role, []);
 
 		return {
 			user: this.sanitizeUser(user),

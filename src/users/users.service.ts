@@ -5,9 +5,12 @@ import { User } from './schemas/user.schema';
 import { UserRole } from '../common/enums/user-role.enum';
 
 interface CreateUserInput {
+	name: string;
 	email: string;
 	password: string;
 	role: UserRole;
+	storeName: string;
+	storeUrl: string;
 }
 
 @Injectable()
@@ -34,6 +37,10 @@ export class UsersService {
 
 	async findByEmail(email: string): Promise<User | null> {
 		return this.userModel.findOne({ email }).exec();
+	}
+
+	async findByStoreName(storeName: string): Promise<User | null> {
+		return this.userModel.findOne({ storeName }).exec();
 	}
 
 	async updateRole(id: string, role: UserRole): Promise<User> {

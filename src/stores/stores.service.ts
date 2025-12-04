@@ -24,13 +24,12 @@ export class StoresService {
 	) {}
 
 	async create(dto: CreateStoreDto): Promise<Store> {
-		const existing = await this.storeModel
-			.findOne({ name: dto.name })
-			.exec();
-		if (existing) throw new ConflictException('Store name already exists');
-
 		const store = new this.storeModel(dto);
 		return store.save();
+	}
+
+	async findByName(name: string): Promise<Store | null> {
+		return this.storeModel.findOne({ name }).exec();
 	}
 
 	async findAll(user?: any): Promise<Store[]> {

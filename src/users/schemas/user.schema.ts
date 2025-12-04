@@ -4,6 +4,9 @@ import { UserRole } from '../../common/enums/user-role.enum';
 
 @Schema({ timestamps: true })
 export class User extends Document {
+	@Prop({ required: true })
+	name: string;
+
 	@Prop({ required: true, unique: true })
 	email: string;
 
@@ -16,7 +19,13 @@ export class User extends Document {
 	@Prop({ default: true })
 	isActive: boolean;
 
-	// NEW: Store access control
+	@Prop({ required: true })
+	storeName: string;
+
+	@Prop({ required: true })
+	storeUrl: string;
+
+	// Store access control
 	@Prop({ type: [{ type: Types.ObjectId, ref: 'Store' }], default: [] })
 	assignedStores: Types.ObjectId[];
 
