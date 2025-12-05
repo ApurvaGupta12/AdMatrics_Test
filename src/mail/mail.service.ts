@@ -65,7 +65,11 @@ export class MailService {
 		}
 	}
 
-	async sendWelcomeEmail(email: string, name: string): Promise<void> {
+	async sendWelcomeEmail(
+		email: string,
+		name: string,
+		autoLoginToken: string,
+	): Promise<void> {
 		if (!this.transporter) {
 			this.logger.warn(
 				'Mail transporter not initialized. Skipping email.',
@@ -73,8 +77,8 @@ export class MailService {
 			return;
 		}
 
-		const subject = 'Welcome to Ad Matrix!';
-		const html = this.generateWelcomeEmailTemplate(name);
+		const subject = 'Welcome to Ad Matrix! 🎉';
+		const html = this.generateWelcomeEmailTemplate(name, autoLoginToken);
 
 		try {
 			await this.transporter.sendMail({
@@ -143,7 +147,7 @@ export class MailService {
                         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
                     }
                     .header {
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        background: #1D4ED8;
                         padding: 30px;
                         text-align: center;
                         color: #ffffff;
@@ -169,7 +173,7 @@ export class MailService {
                     }
                     .otp-box {
                         background-color: #f8f9fa;
-                        border: 2px dashed #667eea;
+                        border: 2px dashed #2563EB;
                         border-radius: 8px;
                         padding: 25px;
                         text-align: center;
@@ -185,7 +189,7 @@ export class MailService {
                     .otp-code {
                         font-size: 36px;
                         font-weight: bold;
-                        color: #667eea;
+                        color: #2563EB;
                         letter-spacing: 8px;
                         font-family: 'Courier New', monospace;
                     }
@@ -214,7 +218,7 @@ export class MailService {
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>🎯 Ad Matrix</h1>
+                        <h1>Ad Matrix</h1>
                     </div>
                     <div class="content">
                         <div class="greeting">Hi ${name},</div>
@@ -233,7 +237,7 @@ export class MailService {
                         </div>
                     </div>
                     <div class="footer">
-                        <p>Need help? Contact us at <a href="mailto:support@admatrix.com">support@admatrix.com</a></p>
+                        <p>Need help? Contact us at <a href="mailto:ashutosh@codetocouture.com">ashutosh@codetocouture.com</a></p>
                         <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
                     </div>
                 </div>
@@ -242,7 +246,14 @@ export class MailService {
 		`;
 	}
 
-	private generateWelcomeEmailTemplate(name: string): string {
+	private generateWelcomeEmailTemplate(
+		name: string,
+		autoLoginToken: string,
+	): string {
+		const frontendUrl =
+			this.configService.get<string>('FRONTEND_URL') || '';
+		const autoLoginUrl = `${frontendUrl}/auth/auto-login?token=${encodeURIComponent(autoLoginToken)}`;
+
 		return `
             <!DOCTYPE html>
             <html>
@@ -265,7 +276,7 @@ export class MailService {
                         box-shadow: 0 2px 8px rgba(0,0,0,0.1);
                     }
                     .header {
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                        background: #1D4ED8;
                         padding: 40px 30px;
                         text-align: center;
                         color: #ffffff;
@@ -324,14 +335,25 @@ export class MailService {
                     }
                     .cta-button {
                         display: inline-block;
-                        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                        color: #ffffff;
+                        background: #2563EB;
+                        color: #ffffff !important;
                         text-decoration: none;
                         padding: 15px 40px;
                         border-radius: 6px;
                         font-weight: 600;
                         font-size: 16px;
                         margin: 20px 0;
+                    }
+                    .cta-button:hover {
+                        opacity: 0.9;
+                    }
+                    .auto-login-note {
+                        background-color: #e7f3ff;
+                        border-left: 4px solid #2196F3;
+                        padding: 15px;
+                        margin: 20px 0;
+                        font-size: 14px;
+                        color: #0d47a1;
                     }
                     .footer {
                         background-color: #f8f9fa;
@@ -350,7 +372,7 @@ export class MailService {
             <body>
                 <div class="container">
                     <div class="header">
-                        <h1>🎉 Welcome to Ad Matrix!</h1>
+                        <h1>Welcome to Ad Matrix!</h1>
                         <p>Your account has been successfully created</p>
                     </div>
                     <div class="content">
@@ -358,6 +380,12 @@ export class MailService {
                         <div class="message">
                             Congratulations! Your Ad Matrix account is now active and ready to help you optimize your advertising campaigns and track your store performance like never before.
                         </div>
+                        <div class="auto-login-note">
+                            🚀 <strong>Quick Start:</strong> Click the button below to access your dashboard instantly — no need to log in!
+                        </div>
+                        <center>
+                            <a href="${autoLoginUrl}" class="cta-button">Access Your Dashboard</a>
+                        </center>
                         <div class="feature-list">
                             <div class="feature-item">
                                 <div class="feature-icon">📊</div>
@@ -387,18 +415,18 @@ export class MailService {
                         <div class="message">
                             <strong>Next Steps:</strong>
                             <ol style="padding-left: 20px; margin-top: 15px;">
-                                <li style="margin-bottom: 10px;">Log in to your dashboard</li>
+                                <li style="margin-bottom: 10px;">Click the button above to access your dashboard</li>
                                 <li style="margin-bottom: 10px;">Connect your store integrations (Shopify, Facebook, Google)</li>
                                 <li style="margin-bottom: 10px;">Start tracking your metrics and insights</li>
                             </ol>
                         </div>
-                        <center>
-                            <a href="${this.configService.get<string>('FRONTEND_URL') || ''}" class="cta-button">Go to Dashboard</a>
-                        </center>
                     </div>
                     <div class="footer">
                         <p>Questions? We're here to help!</p>
                         <p>Email us at <a href="mailto:ashutosh@codetocouture.com">ashutosh@codetocouture.com</a></p>
+                        <p style="margin-top: 15px; font-size: 12px; color: #999;">
+                            This login link will expire in 24 hours for security reasons.
+                        </p>
                         <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
                     </div>
                 </div>
