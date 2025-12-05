@@ -7,14 +7,16 @@ import { AuthController } from './auth.controller';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
 import { JwtStrategy } from './strategies/jwt.strategy';
-import { Otp, OtpSchema } from './schemas/otp.schema';
+import { PendingUser, PendingUserSchema } from './schemas/pending-user.schema';
 
 @Module({
 	imports: [
 		ConfigModule,
 		UsersModule,
 		MailModule,
-		MongooseModule.forFeature([{ name: Otp.name, schema: OtpSchema }]),
+		MongooseModule.forFeature([
+			{ name: PendingUser.name, schema: PendingUserSchema },
+		]),
 		JwtModule.registerAsync({
 			inject: [ConfigService],
 			useFactory: (config: ConfigService) => ({

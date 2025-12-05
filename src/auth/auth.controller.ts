@@ -1,9 +1,18 @@
-import { Controller, Post, Body, Get, UseGuards, Req } from '@nestjs/common';
+import {
+	Controller,
+	Post,
+	Body,
+	Get,
+	UseGuards,
+	Req,
+	Query,
+} from '@nestjs/common';
 import {
 	ApiTags,
 	ApiOperation,
 	ApiResponse,
 	ApiBearerAuth,
+	ApiQuery,
 } from '@nestjs/swagger';
 import { AuthService } from './auth.service';
 import { SignupDto } from './dto/signup.dto';
@@ -19,9 +28,9 @@ export class AuthController {
 
 	@Post('signup')
 	@ApiOperation({
-		summary: 'Initiate user registration (sends OTP to email)',
+		summary: 'Register new user (sends OTP to email)',
 		description:
-			'Send user details to receive an OTP via email for verification',
+			'Submit registration details. User data is stored temporarily and OTP is sent via email. After OTP verification, account is created automatically.',
 	})
 	@ApiResponse({
 		status: 201,
@@ -49,38 +58,14 @@ export class AuthController {
 
 	@Post('verify-otp')
 	@ApiOperation({
-		summary: 'Verify email with OTP',
-		description: 'Verify the OTP sent to your email',
+		summary: 'Verify OTP and create account',
+		description:
+			'Verify the OTP sent to email. On success, account is created automatically and welcome email with auto-login link is sent.',
 	})
 	@ApiResponse({
 		status: 200,
-		description: 'Email verified successfully',
-		schema: {
-			type: 'object',
-			properties: {
-				message: {
-					type: 'string',
-					example:
-						'Email verified successfully. You can now complete your registration.',
-				},
-				email: { type: 'string', example: 'user@example.com' },
-			},
-		},
-	})
-	@ApiResponse({ status: 400, description: 'Invalid or expired OTP' })
-	async verifyOtp(@Body() dto: VerifyOtpDto) {
-		return this.authService.verifyOtp(dto);
-	}
-
-	@Post('complete-signup')
-	@ApiOperation({
-		summary: 'Complete registration after OTP verification',
 		description:
-			'Complete account creation after successful OTP verification and sends welcome email.',
-	})
-	@ApiResponse({
-		status: 201,
-		description: 'User successfully registered and welcome email sent',
+			'OTP verified, account created, and welcome email sent with auto-login link',
 		schema: {
 			type: 'object',
 			properties: {
@@ -89,17 +74,14 @@ export class AuthController {
 				message: {
 					type: 'string',
 					example:
-						'Account created successfully. Welcome to Ad Matrix!',
+						'Email verified successfully! Account created. Check your email for login link.',
 				},
 			},
 		},
 	})
-	@ApiResponse({
-		status: 400,
-		description: 'Email not verified or already registered',
-	})
-	async completeSignup(@Body() dto: SignupDto) {
-		return this.authService.completeSignup(dto);
+	@ApiResponse({ status: 400, description: 'Invalid or expired OTP' })
+	async verifyOtp(@Body() dto: VerifyOtpDto) {
+		return this.authService.verifyOtp(dto);
 	}
 
 	@Post('resend-otp')
@@ -134,6 +116,33 @@ export class AuthController {
 	@ApiResponse({ status: 401, description: 'Invalid credentials' })
 	async login(@Body() dto: LoginDto) {
 		return this.authService.login(dto);
+	}
+
+	@Get('auto-login')
+	@ApiOperation({
+		summary: 'Auto-login with token from email',
+		description:
+			'Used by the welcome email link to automatically log users in. Token is valid for 24 hours.',
+	})
+	@ApiQuery({
+		name: 'token',
+		required: true,
+		description: 'JWT token from welcome email',
+	})
+	@ApiResponse({
+		status: 200,
+		description: 'Successfully authenticated via auto-login',
+		schema: {
+			type: 'object',
+			properties: {
+				user: { type: 'object' },
+				token: { type: 'string' },
+			},
+		},
+	})
+	@ApiResponse({ status: 401, description: 'Invalid or expired token' })
+	async autoLogin(@Query('token') token: string) {
+		return this.authService.autoLogin(token);
 	}
 
 	@Get('me')

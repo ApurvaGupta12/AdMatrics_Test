@@ -15,7 +15,7 @@ import { LoginDto } from './dto/login.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { UserRole } from '../common/enums/user-role.enum';
-import { Otp } from './schemas/otp.schema';
+import { PendingUser } from './schemas/pending-user.schema';
 
 @Injectable()
 export class AuthService {
@@ -23,8 +23,8 @@ export class AuthService {
 		private readonly usersService: UsersService,
 		private readonly jwtService: JwtService,
 		private readonly mailService: MailService,
-		@InjectModel(Otp.name)
-		private readonly otpModel: Model<Otp>,
+		@InjectModel(PendingUser.name)
+		private readonly pendingUserModel: Model<PendingUser>,
 	) {}
 
 	private sanitizeUser(user: any) {
@@ -40,10 +40,10 @@ export class AuthService {
 	}
 
 	async signup(dto: SignupDto) {
-		// Check if email already exists
-		const existing = await this.usersService.findByEmail(dto.email);
-		if (existing) {
-			throw new ConflictException('Email already in use');
+		// Check if email already exists in actual users
+		const existingUser = await this.usersService.findByEmail(dto.email);
+		if (existingUser) {
+			throw new ConflictException('Email already registered');
 		}
 
 		// Check if store name already exists
@@ -54,18 +54,30 @@ export class AuthService {
 			throw new ConflictException('Store name already in use');
 		}
 
+		// Hash password immediately
+		const hashedPassword = await bcrypt.hash(dto.password, 12);
+
 		// Generate OTP
 		const otp = this.generateOtp();
-		const expiresAt = new Date();
-		expiresAt.setMinutes(expiresAt.getMinutes() + 10); // 10 minutes expiry
+		const otpExpiresAt = new Date();
+		otpExpiresAt.setMinutes(otpExpiresAt.getMinutes() + 10); // 10 minutes
 
-		await this.otpModel.create({
+		// Delete any existing pending user with this email
+		await this.pendingUserModel.deleteMany({ email: dto.email });
+
+		// Store pending user with all data
+		await this.pendingUserModel.create({
 			email: dto.email,
+			name: dto.name,
+			password: hashedPassword,
+			storeName: dto.storeName,
+			storeUrl: dto.storeUrl,
 			otp,
-			expiresAt,
+			otpExpiresAt,
 			isVerified: false,
 		});
 
+		// Send OTP email
 		await this.mailService.sendOtpEmail(dto.email, otp, dto.name);
 
 		return {
@@ -77,110 +89,94 @@ export class AuthService {
 	}
 
 	async verifyOtp(dto: VerifyOtpDto) {
-		const otpRecord = await this.otpModel
+		// Find pending user with matching OTP
+		const pendingUser = await this.pendingUserModel
 			.findOne({
 				email: dto.email,
 				otp: dto.otp,
 				isVerified: false,
 			})
-			.sort({ createdAt: -1 })
 			.exec();
 
-		if (!otpRecord) {
+		if (!pendingUser) {
 			throw new BadRequestException('Invalid or expired OTP');
 		}
 
 		// Check if OTP is expired
-		if (new Date() > otpRecord.expiresAt) {
+		if (new Date() > pendingUser.otpExpiresAt) {
 			throw new BadRequestException(
 				'OTP has expired. Please request a new one.',
 			);
 		}
 
-		// Mark OTP as verified
-		otpRecord.isVerified = true;
-		await otpRecord.save();
+		// Check again if email was registered in the meantime
+		const existingUser = await this.usersService.findByEmail(dto.email);
+		if (existingUser) {
+			await this.pendingUserModel.deleteOne({ email: dto.email });
+			throw new ConflictException('Email already registered');
+		}
+
+		// Create the actual user account
+		const user = await this.usersService.create({
+			name: pendingUser.name,
+			email: pendingUser.email,
+			password: pendingUser.password, // Already hashed
+			role: UserRole.MANAGER,
+			storeName: pendingUser.storeName,
+			storeUrl: pendingUser.storeUrl,
+		});
+
+		// Generate auto-login token
+		const token = await this.signToken(user.id, user.email, user.role, []);
+
+		// Send welcome email with auto-login link
+		await this.mailService.sendWelcomeEmail(user.email, user.name, token);
+
+		// Delete pending user record
+		await this.pendingUserModel.deleteOne({ email: dto.email });
 
 		return {
+			user: this.sanitizeUser(user),
+			token,
 			message:
-				'Email verified successfully. You can now complete your registration.',
-			email: dto.email,
+				'Email verified successfully! Account created. Check your email for login link.',
 		};
 	}
 
 	async resendOtp(dto: ResendOtpDto) {
+		// Check if user already exists
 		const existingUser = await this.usersService.findByEmail(dto.email);
 		if (existingUser) {
-			throw new ConflictException(
-				'Email already registered and verified',
+			throw new ConflictException('Email already registered');
+		}
+
+		// Find pending user
+		const pendingUser = await this.pendingUserModel
+			.findOne({ email: dto.email })
+			.exec();
+
+		if (!pendingUser) {
+			throw new BadRequestException(
+				'No pending registration found for this email. Please sign up first.',
 			);
 		}
 
-		// Invalidate previous OTPs
-		await this.otpModel.updateMany(
-			{ email: dto.email, isVerified: false },
-			{ $set: { isVerified: true } },
-		);
-
 		const otp = this.generateOtp();
-		const expiresAt = new Date();
-		expiresAt.setMinutes(expiresAt.getMinutes() + 10);
+		const otpExpiresAt = new Date();
+		otpExpiresAt.setMinutes(otpExpiresAt.getMinutes() + 10);
 
-		await this.otpModel.create({
-			email: dto.email,
-			otp,
-			expiresAt,
-			isVerified: false,
-		});
+		// Update pending user with new OTP
+		pendingUser.otp = otp;
+		pendingUser.otpExpiresAt = otpExpiresAt;
+		await pendingUser.save();
 
-		// Note: You'll need to store the user's name somewhere or fetch it
-		// For now, using a generic greeting
-		await this.mailService.sendOtpEmail(dto.email, otp, 'User');
+		// Send new OTP email
+		await this.mailService.sendOtpEmail(dto.email, otp, pendingUser.name);
 
 		return {
 			message: 'New OTP sent to your email',
 			email: dto.email,
 			expiresIn: '10 minutes',
-		};
-	}
-
-	async completeSignup(dto: SignupDto) {
-		const verifiedOtp = await this.otpModel
-			.findOne({
-				email: dto.email,
-				isVerified: true,
-			})
-			.sort({ createdAt: -1 })
-			.exec();
-
-		if (!verifiedOtp) {
-			throw new BadRequestException('Please verify your email first');
-		}
-
-		const existing = await this.usersService.findByEmail(dto.email);
-		if (existing) {
-			throw new ConflictException('Email already in use');
-		}
-
-		const hashedPassword = await bcrypt.hash(dto.password, 12);
-
-		const user = await this.usersService.create({
-			name: dto.name,
-			email: dto.email,
-			password: hashedPassword,
-			role: UserRole.MANAGER,
-			storeName: dto.storeName,
-			storeUrl: dto.storeUrl,
-		});
-
-		await this.mailService.sendWelcomeEmail(dto.email, dto.name);
-
-		const token = await this.signToken(user.id, user.email, user.role, []);
-
-		return {
-			user: this.sanitizeUser(user),
-			token,
-			message: 'Account created successfully. Welcome to Ad Matrix!',
 		};
 	}
 
@@ -211,6 +207,20 @@ export class AuthService {
 	async getProfile(userId: string) {
 		const user = await this.usersService.findById(userId);
 		return this.sanitizeUser(user);
+	}
+
+	async autoLogin(token: string) {
+		try {
+			const payload = await this.jwtService.verifyAsync(token);
+			const user = await this.usersService.findById(payload.sub);
+
+			return {
+				user: this.sanitizeUser(user),
+				token,
+			};
+		} catch (error) {
+			throw new UnauthorizedException('Invalid or expired token');
+		}
 	}
 
 	private async signToken(
