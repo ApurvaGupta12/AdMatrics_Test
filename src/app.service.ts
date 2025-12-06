@@ -6,7 +6,7 @@ export class AppService {
 		return 'Ad Matrix Backend is running successfully!';
 	}
 
-	healthCheck(): { status: string; timestamp: string } {
+	getHealthCheck(): { status: string; timestamp: string } {
 		return {
 			status: 'ok',
 			timestamp: new Date().toISOString(),

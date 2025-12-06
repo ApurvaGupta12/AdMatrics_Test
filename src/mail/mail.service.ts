@@ -43,8 +43,8 @@ export class MailService {
 		name: string,
 	): Promise<void> {
 		if (!this.transporter) {
-			this.logger.warn(
-				'Mail transporter not initialized. Skipping email.',
+			this.logger.error(
+				'Mail transporter not initialized - check env vars',
 			);
 			return;
 		}
@@ -58,9 +58,9 @@ export class MailService {
 				subject,
 				html,
 			});
-			this.logger.log(`OTP email sent successfully to ${email}`);
+			this.logger.log(`✓ OTP email sent successfully to ${email}`);
 		} catch (error) {
-			this.logger.error(`Failed to send OTP email to ${email}:`, error);
+			this.logger.error(`✗ Failed to send OTP to ${email}:`, error);
 			throw error;
 		}
 	}

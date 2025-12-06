@@ -33,6 +33,6 @@ export class AppController {
 		},
 	})
 	healthCheck(): { status: string; timestamp: string } {
-		return this.appService.healthCheck();
+		return this.appService.getHealthCheck();
 	}
 }

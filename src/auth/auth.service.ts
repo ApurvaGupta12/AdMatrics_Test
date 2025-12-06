@@ -77,8 +77,10 @@ export class AuthService {
 			isVerified: false,
 		});
 
-		// Send OTP email
-		await this.mailService.sendOtpEmail(dto.email, otp, dto.name);
+		// Send OTP email asynchronously (non-blocking)
+		this.mailService.sendOtpEmail(dto.email, otp, dto.name).catch((err) => {
+			console.error('Failed to send OTP email:', err);
+		});
 
 		return {
 			message:
@@ -129,8 +131,12 @@ export class AuthService {
 		// Generate auto-login token
 		const token = await this.signToken(user.id, user.email, user.role, []);
 
-		// Send welcome email with auto-login link
-		await this.mailService.sendWelcomeEmail(user.email, user.name, token);
+		// Send welcome email asynchronously (non-blocking)
+		this.mailService
+			.sendWelcomeEmail(user.email, user.name, token)
+			.catch((err) => {
+				console.error('Failed to send welcome email:', err);
+			});
 
 		// Delete pending user record
 		await this.pendingUserModel.deleteOne({ email: dto.email });
@@ -170,8 +176,12 @@ export class AuthService {
 		pendingUser.otpExpiresAt = otpExpiresAt;
 		await pendingUser.save();
 
-		// Send new OTP email
-		await this.mailService.sendOtpEmail(dto.email, otp, pendingUser.name);
+		// Send new OTP email asynchronously (non-blocking)
+		this.mailService
+			.sendOtpEmail(dto.email, otp, pendingUser.name)
+			.catch((err) => {
+				console.error('Failed to resend OTP email:', err);
+			});
 
 		return {
 			message: 'New OTP sent to your email',

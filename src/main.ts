@@ -7,7 +7,10 @@ async function bootstrap() {
 	const app = await NestFactory.create(AppModule);
 
 	app.setGlobalPrefix('api', {
-		exclude: [{ path: '/', method: RequestMethod.GET }],
+		exclude: [
+			{ path: '/', method: RequestMethod.GET },
+			{ path: '/health', method: RequestMethod.GET },
+		],
 	});
 
 	const config = new DocumentBuilder()
@@ -44,9 +47,12 @@ async function bootstrap() {
 		}),
 	);
 
-	const port = process.env.PORT || 3001;
+	const port = parseInt(process.env.PORT || '10000');
 	await app.listen(port, '0.0.0.0');
 
 	console.log(`🚀 Backend running on port ${port}`);
 }
-bootstrap();
+bootstrap().catch((err) => {
+	console.error('Failed to start application:', err);
+	process.exit(1);
+});
