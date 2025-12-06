@@ -16,6 +16,7 @@ import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { PendingUser } from './schemas/pending-user.schema';
+import { AcceptInvitationDto } from '../users/dto/accept-invitation.dto';
 
 @Injectable()
 export class AuthService {
@@ -247,5 +248,61 @@ export class AuthService {
 		};
 
 		return this.jwtService.signAsync(payload);
+	}
+
+	async getInvitationDetails(token: string) {
+		const invitation = await this.usersService.findInvitationByToken(token);
+
+		if (!invitation) {
+			throw new BadRequestException('Invitation not found or expired');
+		}
+
+		if (new Date() > invitation.expiresAt) {
+			throw new BadRequestException('Invitation has expired');
+		}
+
+		return invitation;
+	}
+
+	async acceptInvitation(token: string, dto: AcceptInvitationDto) {
+		const invitation = await this.getInvitationDetails(token);
+
+		const existingUser = await this.usersService.findByEmail(
+			invitation.email,
+		);
+		if (existingUser) {
+			throw new ConflictException('Email already registered');
+		}
+
+		const hashedPassword = await bcrypt.hash(dto.password, 12);
+
+		const user = await this.usersService.create({
+			name: dto.name,
+			email: invitation.email,
+			password: hashedPassword,
+			role: UserRole.VIEWER,
+			storeName: invitation.storeName,
+			storeUrl: invitation.storeUrl,
+		});
+
+		const storeIds = invitation.assignedStores.map((s) => s.toString());
+		await this.usersService.assignStores(user._id.toString(), storeIds);
+
+		// Mark invitation as accepted
+		await this.usersService.acceptInvitation(token);
+
+		const jwtToken = await this.signToken(
+			user._id.toString(),
+			user.email,
+			user.role,
+			storeIds,
+		);
+
+		return {
+			user: this.sanitizeUser(user),
+			token: jwtToken,
+			message:
+				'Account created successfully! You can now access your assigned stores.',
+		};
 	}
 }

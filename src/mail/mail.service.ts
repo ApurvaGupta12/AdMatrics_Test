@@ -96,30 +96,66 @@ export class MailService {
 		}
 	}
 
-	// Future-ready: Send custom emails (for reports, metrics, etc.)
-	async sendCustomEmail(
-		to: string,
-		subject: string,
-		html: string,
-		attachments?: any[],
+	async sendViewerInvitation(
+		email: string,
+		inviterName: string,
+		storeName: string,
+		invitationToken: string,
 	): Promise<void> {
 		if (!this.transporter) {
-			this.logger.warn(
-				'Mail transporter not initialized. Skipping email.',
-			);
+			this.logger.error('Mail transporter not initialized');
 			return;
 		}
 
+		const frontendUrl =
+			this.configService.get<string>('FRONTEND_URL') || '';
+		const invitationUrl = `${frontendUrl}/auth/accept-invitation?token=${encodeURIComponent(invitationToken)}`;
+
+		const subject = `You've been invited to Ad Matrix by ${inviterName}`;
+		const html = this.generateInvitationEmailTemplate(
+			inviterName,
+			storeName,
+			invitationUrl,
+		);
+
 		try {
-			await this.transporter.sendMail({
-				to,
-				subject,
-				html,
-				attachments,
-			});
-			this.logger.log(`Custom email sent successfully to ${to}`);
+			await this.transporter.sendMail({ to: email, subject, html });
+			this.logger.log(`✓ Invitation email sent to ${email}`);
 		} catch (error) {
-			this.logger.error(`Failed to send custom email to ${to}:`, error);
+			this.logger.error(
+				`✗ Failed to send invitation to ${email}:`,
+				error,
+			);
+			throw error;
+		}
+	}
+
+	async sendStoreAssignmentNotification(
+		email: string,
+		viewerName: string,
+		managerName: string,
+		storeNames: string[],
+	): Promise<void> {
+		if (!this.transporter) {
+			this.logger.error('Mail transporter not initialized');
+			return;
+		}
+
+		const subject = `New Store Access Granted - Ad Matrix`;
+		const html = this.generateStoreAssignmentTemplate(
+			viewerName,
+			managerName,
+			storeNames,
+		);
+
+		try {
+			await this.transporter.sendMail({ to: email, subject, html });
+			this.logger.log(`✓ Store assignment notification sent to ${email}`);
+		} catch (error) {
+			this.logger.error(
+				`✗ Failed to send assignment notification to ${email}:`,
+				error,
+			);
 			throw error;
 		}
 	}
@@ -427,6 +463,142 @@ export class MailService {
                         <p style="margin-top: 15px; font-size: 12px; color: #999;">
                             This login link will expire in 24 hours for security reasons.
                         </p>
+                        <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+		`;
+	}
+
+	private generateInvitationEmailTemplate(
+		inviterName: string,
+		storeName: string,
+		invitationUrl: string,
+	): string {
+		return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
+                    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                    .header { background: #1D4ED8; padding: 40px 30px; text-align: center; color: #ffffff; }
+                    .header h1 { margin: 0 0 10px 0; font-size: 32px; font-weight: 600; }
+                    .content { padding: 40px 30px; }
+                    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; font-weight: 600; }
+                    .message { font-size: 16px; color: #555555; line-height: 1.8; margin-bottom: 25px; }
+                    .store-info { background-color: #f8f9fa; border-radius: 8px; padding: 20px; margin: 25px 0; border-left: 4px solid #2563EB; }
+                    .store-info strong { color: #2563EB; font-size: 18px; }
+                    .cta-button { display: inline-block; background: #2563EB; color: #ffffff !important; text-decoration: none; padding: 15px 40px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 20px 0; }
+                    .info-box { background-color: #e7f3ff; border-left: 4px solid #2196F3; padding: 15px; margin: 20px 0; font-size: 14px; color: #0d47a1; }
+                    .footer { background-color: #f8f9fa; padding: 20px 30px; text-align: center; font-size: 14px; color: #666666; border-top: 1px solid #e0e0e0; }
+                    .footer a { color: #667eea; text-decoration: none; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>You're Invited! 🎉</h1>
+                        <p>Join Ad Matrix and start tracking metrics</p>
+                    </div>
+                    <div class="content">
+                        <div class="greeting">Hello!</div>
+                        <div class="message">
+                            <strong>${inviterName}</strong> has invited you to join Ad Matrix as a Viewer to access store analytics and performance metrics.
+                        </div>
+                        <div class="store-info">
+                            <strong>Store:</strong> ${storeName}<br/>
+                            <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                                You'll have view-only access to track orders, revenue, ad spend, and product performance.
+                            </div>
+                        </div>
+                        <div class="info-box">
+                            🚀 <strong>Next Step:</strong> Click below to set up your password and access your dashboard
+                        </div>
+                        <center>
+                            <a href="${invitationUrl}" class="cta-button">Accept Invitation & Set Password</a>
+                        </center>
+                        <div class="message" style="margin-top: 30px;">
+                            <strong>What you'll get:</strong>
+                            <ul style="padding-left: 20px; margin-top: 15px;">
+                                <li style="margin-bottom: 10px;">Real-time store performance analytics</li>
+                                <li style="margin-bottom: 10px;">Ad spend tracking across platforms</li>
+                                <li style="margin-bottom: 10px;">Product performance insights</li>
+                                <li style="margin-bottom: 10px;">Traffic and conversion metrics</li>
+                            </ul>
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>Questions? Contact us at <a href="mailto:ashutosh@codetocouture.com">ashutosh@codetocouture.com</a></p>
+                        <p style="margin-top: 15px; font-size: 12px; color: #999;">This invitation expires in 7 days.</p>
+                        <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+		`;
+	}
+
+	private generateStoreAssignmentTemplate(
+		viewerName: string,
+		managerName: string,
+		storeNames: string[],
+	): string {
+		const frontendUrl =
+			this.configService.get<string>('FRONTEND_URL') || '';
+		const storeList = storeNames
+			.map((name) => `<li style="margin-bottom: 8px;">📊 ${name}</li>`)
+			.join('');
+
+		return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
+                    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                    .header { background: #10b981; padding: 40px 30px; text-align: center; color: #ffffff; }
+                    .header h1 { margin: 0 0 10px 0; font-size: 32px; font-weight: 600; }
+                    .content { padding: 40px 30px; }
+                    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; font-weight: 600; }
+                    .message { font-size: 16px; color: #555555; line-height: 1.8; margin-bottom: 25px; }
+                    .stores-box { background-color: #f0fdf4; border-radius: 8px; padding: 20px; margin: 25px 0; border-left: 4px solid #10b981; }
+                    .stores-box h3 { margin: 0 0 15px 0; color: #10b981; font-size: 18px; }
+                    .stores-box ul { list-style: none; padding: 0; margin: 0; }
+                    .cta-button { display: inline-block; background: #10b981; color: #ffffff !important; text-decoration: none; padding: 15px 40px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 20px 0; }
+                    .footer { background-color: #f8f9fa; padding: 20px 30px; text-align: center; font-size: 14px; color: #666666; border-top: 1px solid #e0e0e0; }
+                    .footer a { color: #667eea; text-decoration: none; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>New Store Access! 🎉</h1>
+                        <p>You've been granted access to additional stores</p>
+                    </div>
+                    <div class="content">
+                        <div class="greeting">Hi ${viewerName}!</div>
+                        <div class="message">
+                            <strong>${managerName}</strong> has granted you access to view analytics for the following store(s):
+                        </div>
+                        <div class="stores-box">
+                            <h3>New Stores Assigned:</h3>
+                            <ul>${storeList}</ul>
+                        </div>
+                        <div class="message">
+                            You can now view real-time metrics, track performance, and analyze data for these stores directly from your Ad Matrix dashboard.
+                        </div>
+                        <center>
+                            <a href="${frontendUrl}" class="cta-button">View Dashboard</a>
+                        </center>
+                    </div>
+                    <div class="footer">
+                        <p>Questions? Contact us at <a href="mailto:ashutosh@codetocouture.com">ashutosh@codetocouture.com</a></p>
                         <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
                     </div>
                 </div>
