@@ -11,9 +11,15 @@ import {
 	Req,
 	NotFoundException,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger';
+import {
+	ApiTags,
+	ApiOperation,
+	ApiBearerAuth,
+	ApiParam,
+} from '@nestjs/swagger';
 import { UsersService } from './users.service';
 import { StoresService } from '../stores/stores.service';
+import { MailService } from '../mail/mail.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
@@ -21,6 +27,7 @@ import { UserRole } from '../common/enums/user-role.enum';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
 import { SetUserActiveDto } from './dto/set-user-active.dto';
 import { AssignStoresDto } from './dto/assign-stores.dto';
+import { InviteViewerDto } from './dto/invite-viewer.dto';
 
 @ApiTags('Users')
 @ApiBearerAuth('JWT-auth')
@@ -30,6 +37,7 @@ export class UsersController {
 	constructor(
 		private readonly usersService: UsersService,
 		private readonly storesService: StoresService,
+		private readonly mailService: MailService,
 	) {}
 
 	@Get()
@@ -74,6 +82,91 @@ export class UsersController {
 		delete obj.password;
 		delete obj.__v;
 		return obj;
+	}
+
+	@Post('invite-viewer')
+	@Roles(UserRole.MANAGER)
+	@ApiOperation({ summary: 'Invite viewer to access stores (Manager only)' })
+	async inviteViewer(@Body() dto: InviteViewerDto, @Req() req: any) {
+		const manager = await this.usersService.findById(req.user.userId);
+
+		// Verify manager has access to all stores they're trying to assign
+		const managerStores = manager.assignedStores.map((s) => s.toString());
+		const unauthorized = dto.storeIds.some(
+			(id) => !managerStores.includes(id),
+		);
+
+		if (unauthorized) {
+			throw new ForbiddenException(
+				'You can only assign stores you manage',
+			);
+		}
+
+		// Check if viewer already exists
+		const existingViewer = await this.usersService.findByEmail(dto.email);
+
+		if (existingViewer) {
+			// Existing user - just assign stores and notify
+			await this.usersService.assignStores(
+				existingViewer._id.toString(),
+				dto.storeIds,
+			);
+
+			// Get store names for email
+			const stores = await Promise.all(
+				dto.storeIds.map((id) => this.storesService.findOne(id)),
+			);
+			const storeNames = stores.map((s) => s.name);
+
+			// Send notification email (non-blocking)
+			this.mailService
+				.sendStoreAssignmentNotification(
+					dto.email,
+					existingViewer.name,
+					manager.name,
+					storeNames,
+				)
+				.catch((err) =>
+					console.error(
+						'Failed to send assignment notification:',
+						err,
+					),
+				);
+
+			return {
+				message:
+					'Stores assigned successfully. Notification email sent.',
+				viewer: existingViewer.name,
+				storesAssigned: storeNames,
+			};
+		} else {
+			// New user - create invitation
+			const invitation = await this.usersService.createInvitation(
+				dto.email,
+				manager._id.toString(),
+				dto.storeIds,
+				manager.storeName,
+				manager.storeUrl,
+			);
+
+			// Send invitation email (non-blocking)
+			this.mailService
+				.sendViewerInvitation(
+					dto.email,
+					manager.name,
+					manager.storeName,
+					invitation.token,
+				)
+				.catch((err) =>
+					console.error('Failed to send invitation:', err),
+				);
+
+			return {
+				message: 'Invitation sent successfully. Valid for 7 days.',
+				invitedEmail: dto.email,
+				expiresAt: invitation.expiresAt,
+			};
+		}
 	}
 
 	@Post(':userId/stores')

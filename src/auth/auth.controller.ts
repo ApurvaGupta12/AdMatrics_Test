@@ -6,6 +6,7 @@ import {
 	UseGuards,
 	Req,
 	Query,
+	Param,
 } from '@nestjs/common';
 import {
 	ApiTags,
@@ -20,6 +21,7 @@ import { LoginDto } from './dto/login.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { ResendOtpDto } from './dto/resend-otp.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { AcceptInvitationDto } from '../users/dto/accept-invitation.dto';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -153,5 +155,59 @@ export class AuthController {
 	@ApiResponse({ status: 401, description: 'Unauthorized' })
 	async me(@Req() req: any) {
 		return this.authService.getProfile(req.user.userId);
+	}
+
+	@Get('invitation/:token')
+	@ApiOperation({ summary: 'Get invitation details by token' })
+	@ApiResponse({
+		status: 200,
+		description: 'Invitation details retrieved',
+		schema: {
+			type: 'object',
+			properties: {
+				email: { type: 'string' },
+				storeName: { type: 'string' },
+				invitedBy: { type: 'string' },
+				expiresAt: { type: 'string' },
+			},
+		},
+	})
+	@ApiResponse({
+		status: 404,
+		description: 'Invitation not found or expired',
+	})
+	async getInvitation(@Param('token') token: string) {
+		const invitation = (await this.authService.getInvitationDetails(
+			token,
+		)) as any;
+		return {
+			email: invitation.email,
+			storeName: invitation.storeName,
+			invitedBy: (invitation.invitedBy as any).name,
+			expiresAt: invitation.expiresAt,
+		};
+	}
+
+	@Post('accept-invitation/:token')
+	@ApiOperation({ summary: 'Accept invitation and create viewer account' })
+	@ApiResponse({
+		status: 201,
+		description: 'Account created successfully',
+		schema: {
+			type: 'object',
+			properties: {
+				user: { type: 'object' },
+				token: { type: 'string' },
+				message: { type: 'string' },
+			},
+		},
+	})
+	@ApiResponse({ status: 400, description: 'Invalid or expired invitation' })
+	@ApiResponse({ status: 409, description: 'Email already registered' })
+	async acceptInvitation(
+		@Param('token') token: string,
+		@Body() dto: AcceptInvitationDto,
+	) {
+		return this.authService.acceptInvitation(token, dto);
 	}
 }

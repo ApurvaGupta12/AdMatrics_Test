@@ -1,7 +1,9 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
+import * as crypto from 'crypto';
 import { User } from './schemas/user.schema';
+import { Invitation } from './schemas/invitation.schema';
 import { UserRole } from '../common/enums/user-role.enum';
 
 interface CreateUserInput {
@@ -18,6 +20,8 @@ export class UsersService {
 	constructor(
 		@InjectModel(User.name)
 		private readonly userModel: Model<User>,
+		@InjectModel(Invitation.name)
+		private readonly invitationModel: Model<Invitation>,
 	) {}
 
 	async create(data: CreateUserInput): Promise<User> {
@@ -107,5 +111,55 @@ export class UsersService {
 			.find({ assignedStores: new Types.ObjectId(storeId) })
 			.select('-password -__v')
 			.exec();
+	}
+
+	async createInvitation(
+		email: string,
+		invitedBy: string,
+		storeIds: string[],
+		storeName: string,
+		storeUrl: string,
+	): Promise<Invitation> {
+		// Delete any existing pending invitations for this email
+		await this.invitationModel.deleteMany({ email, isAccepted: false });
+
+		const token = crypto.randomBytes(32).toString('hex');
+		const expiresAt = new Date();
+		expiresAt.setDate(expiresAt.getDate() + 7); // 7 days
+
+		const invitation = new this.invitationModel({
+			email,
+			invitedBy: new Types.ObjectId(invitedBy),
+			assignedStores: storeIds.map((id) => new Types.ObjectId(id)),
+			storeName,
+			storeUrl,
+			token,
+			expiresAt,
+		});
+
+		return invitation.save();
+	}
+
+	async findInvitationByToken(token: string): Promise<Invitation | null> {
+		return this.invitationModel
+			.findOne({ token, isAccepted: false })
+			.populate('invitedBy', 'name email')
+			.exec();
+	}
+
+	async acceptInvitation(token: string): Promise<Invitation> {
+		const invitation = await this.invitationModel
+			.findOneAndUpdate(
+				{ token, isAccepted: false },
+				{ isAccepted: true },
+				{ new: true },
+			)
+			.exec();
+
+		if (!invitation)
+			throw new NotFoundException(
+				'Invitation not found or already accepted',
+			);
+		return invitation;
 	}
 }
