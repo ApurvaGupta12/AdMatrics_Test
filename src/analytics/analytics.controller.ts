@@ -25,7 +25,7 @@ import { ShopifyService } from '../integrations/shopify/shopify.service';
 import { ProductMetricsService } from '../analytics/product-metric.service';
 import { TrafficMetricsService } from './traffic-metric.service';
 
-@ApiTags('Analytics')
+@ApiTags('Shopify Analytics')
 @ApiBearerAuth('JWT-auth')
 @Controller('analytics')
 @UseGuards(JwtAuthGuard, RolesGuard, StoreAccessGuard)
