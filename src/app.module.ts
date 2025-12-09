@@ -11,6 +11,7 @@ import { MetricsModule } from './metrics/metrics.module';
 import { JobsModule } from './jobs/jobs.module';
 import { AnalyticsModule } from './analytics/analytics.module';
 import { MailModule } from './mail/mail.module';
+import { FacebookAnalyticsModule } from './integrations/facebook/facebook-analytics.module';
 
 @Module({
 	imports: [
@@ -29,6 +30,7 @@ import { MailModule } from './mail/mail.module';
 		JobsModule,
 		AnalyticsModule,
 		MailModule,
+		FacebookAnalyticsModule,
 	],
 	controllers: [AppController],
 	providers: [AppService],

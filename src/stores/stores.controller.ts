@@ -37,7 +37,6 @@ export class StoresController {
 	) {}
 
 	@Get()
-	@UseGuards(StoreAccessGuard)
 	@ApiOperation({ summary: 'Get stores visible to the requester' })
 	@ApiResponse({ status: 200, description: 'List of stores' })
 	async findAll(@Req() req: any) {
