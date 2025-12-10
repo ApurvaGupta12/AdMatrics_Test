@@ -17,6 +17,8 @@ import { ResendOtpDto } from './dto/resend-otp.dto';
 import { UserRole } from '../common/enums/user-role.enum';
 import { PendingUser } from './schemas/pending-user.schema';
 import { AcceptInvitationDto } from '../users/dto/accept-invitation.dto';
+import { AuditService } from '../audit/audit.service';
+import { AuditAction, AuditStatus } from '../audit/schemas/audit-log.schema';
 
 @Injectable()
 export class AuthService {
@@ -26,6 +28,7 @@ export class AuthService {
 		private readonly mailService: MailService,
 		@InjectModel(PendingUser.name)
 		private readonly pendingUserModel: Model<PendingUser>,
+		private readonly auditService: AuditService,
 	) {}
 
 	private sanitizeUser(user: any) {
@@ -78,6 +81,13 @@ export class AuthService {
 			isVerified: false,
 		});
 
+		await this.auditService.log({
+			action: AuditAction.USER_SIGNUP,
+			status: AuditStatus.SUCCESS,
+			userEmail: dto.email,
+			metadata: { storeName: dto.storeName },
+		});
+
 		// Send OTP email asynchronously (non-blocking)
 		this.mailService.sendOtpEmail(dto.email, otp, dto.name).catch((err) => {
 			console.error('Failed to send OTP email:', err);
@@ -127,6 +137,14 @@ export class AuthService {
 			role: UserRole.MANAGER,
 			storeName: pendingUser.storeName,
 			storeUrl: pendingUser.storeUrl,
+		});
+
+		await this.auditService.log({
+			action: AuditAction.USER_CREATED,
+			status: AuditStatus.SUCCESS,
+			userId: user.id,
+			userEmail: user.email,
+			metadata: { storeName: user.storeName, role: user.role },
 		});
 
 		// Generate auto-login token
@@ -209,6 +227,13 @@ export class AuthService {
 			user.assignedStores ?? [],
 		);
 
+		await this.auditService.log({
+			action: AuditAction.USER_LOGIN,
+			status: AuditStatus.SUCCESS,
+			userId: user.id,
+			userEmail: user.email,
+		});
+
 		return {
 			user: this.sanitizeUser(user),
 			token,
@@ -283,6 +308,14 @@ export class AuthService {
 			role: UserRole.VIEWER,
 			storeName: invitation.storeName,
 			storeUrl: invitation.storeUrl,
+		});
+
+		await this.auditService.log({
+			action: AuditAction.INVITATION_ACCEPTED,
+			status: AuditStatus.SUCCESS,
+			userId: user._id.toString(),
+			userEmail: user.email,
+			metadata: { invitationToken: token },
 		});
 
 		const storeIds = invitation.assignedStores.map((s) => s.toString());
