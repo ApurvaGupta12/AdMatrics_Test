@@ -5,6 +5,8 @@ import * as crypto from 'crypto';
 import { User } from './schemas/user.schema';
 import { Invitation } from './schemas/invitation.schema';
 import { UserRole } from '../common/enums/user-role.enum';
+import { AuditService } from 'src/audit/audit.service';
+import { AuditAction, AuditStatus } from 'src/audit/schemas/audit-log.schema';
 
 interface CreateUserInput {
 	name: string;
@@ -22,6 +24,7 @@ export class UsersService {
 		private readonly userModel: Model<User>,
 		@InjectModel(Invitation.name)
 		private readonly invitationModel: Model<Invitation>,
+		private readonly auditService: AuditService,
 	) {}
 
 	async create(data: CreateUserInput): Promise<User> {
@@ -52,6 +55,15 @@ export class UsersService {
 			.findByIdAndUpdate(id, { role }, { new: true })
 			.exec();
 		if (!user) throw new NotFoundException('User not found');
+
+		await this.auditService.log({
+			action: AuditAction.USER_ROLE_UPDATED,
+			status: AuditStatus.SUCCESS,
+			metadata: {
+				userId: id,
+				role: role,
+			},
+		});
 		return user;
 	}
 
@@ -60,6 +72,17 @@ export class UsersService {
 			.findByIdAndUpdate(id, { isActive }, { new: true })
 			.exec();
 		if (!user) throw new NotFoundException('User not found');
+
+		await this.auditService.log({
+			action: isActive
+				? AuditAction.USER_ACTIVATED
+				: AuditAction.USER_DEACTIVATED,
+			status: AuditStatus.SUCCESS,
+			metadata: {
+				userId: id,
+				status: isActive,
+			},
+		});
 		return user;
 	}
 
@@ -79,6 +102,15 @@ export class UsersService {
 			.exec();
 
 		if (!user) throw new NotFoundException('User not found');
+
+		await this.auditService.log({
+			action: AuditAction.STORES_ASSIGNED,
+			status: AuditStatus.SUCCESS,
+			metadata: {
+				userId: userId,
+				storeIds: storeIds.map((id) => new Types.ObjectId(id)),
+			},
+		});
 		return user;
 	}
 
@@ -98,6 +130,15 @@ export class UsersService {
 			.exec();
 
 		if (!user) throw new NotFoundException('User not found');
+
+		await this.auditService.log({
+			action: AuditAction.STORES_REMOVED,
+			status: AuditStatus.SUCCESS,
+			metadata: {
+				userId: userId,
+				storeIds: storeIds.map((id) => new Types.ObjectId(id)),
+			},
+		});
 		return user;
 	}
 
@@ -119,7 +160,12 @@ export class UsersService {
 		storeIds: string[],
 		storeName: string,
 		storeUrl: string,
+		role: UserRole,
 	): Promise<Invitation> {
+		if (role !== UserRole.VIEWER) {
+			throw new Error('Only users with the VIEWER role can be invited.');
+		}
+
 		// Delete any existing pending invitations for this email
 		await this.invitationModel.deleteMany({ email, isAccepted: false });
 
@@ -135,6 +181,16 @@ export class UsersService {
 			storeUrl,
 			token,
 			expiresAt,
+		});
+
+		await this.auditService.log({
+			action: AuditAction.INVITATION_SENT,
+			status: AuditStatus.SUCCESS,
+			metadata: {
+				email: email,
+				invitedBy: invitedBy,
+				storeIds: storeIds.map((id) => new Types.ObjectId(id)),
+			},
 		});
 
 		return invitation.save();
@@ -161,5 +217,37 @@ export class UsersService {
 				'Invitation not found or already accepted',
 			);
 		return invitation;
+	}
+
+	async getViewersAssignedByManager(managerId: string): Promise<any[]> {
+		const manager = await this.findById(managerId);
+
+		if (!manager.assignedStores || manager.assignedStores.length === 0) {
+			return [];
+		}
+
+		const managerStoreIds = manager.assignedStores.map((s) => s.toString());
+
+		// Find all viewers who have access to any of the manager's stores
+		const viewers = await this.userModel
+			.find({
+				role: UserRole.VIEWER,
+				assignedStores: {
+					$elemMatch: {
+						$in: manager.assignedStores,
+					},
+				},
+			})
+			.select('-password -__v')
+			.lean()
+			.exec();
+
+		// For each viewer, filter assignedStores to only show stores the manager manages
+		return viewers.map((viewer) => ({
+			...viewer,
+			assignedStores: viewer.assignedStores
+				.map((s: any) => s.toString())
+				.filter((storeId: string) => managerStoreIds.includes(storeId)),
+		}));
 	}
 }
