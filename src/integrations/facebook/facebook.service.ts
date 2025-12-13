@@ -481,17 +481,30 @@ export class FacebookService {
 				insight.objective || '',
 			);
 
+			let id: string;
+			let name: string;
+
+			switch (level) {
+				case 'campaign':
+					id = insight.campaign_id || 'unknown';
+					name = insight.campaign_name || 'Unknown';
+					break;
+				case 'adset':
+					id = insight.adset_id || 'unknown';
+					name = insight.adset_name || 'Unknown';
+					break;
+				case 'ad':
+					id = insight.ad_id || 'unknown';
+					name = insight.ad_name || 'Unknown';
+					break;
+				default:
+					id = 'unknown';
+					name = 'Unknown';
+			}
+
 			const result: InsightMetrics = {
-				id:
-					insight.campaign_id ||
-					insight.adset_id ||
-					insight.ad_id ||
-					'unknown',
-				name:
-					insight.campaign_name ||
-					insight.adset_name ||
-					insight.ad_name ||
-					'Unknown',
+				id,
+				name,
 				...metrics,
 			};
 
@@ -552,43 +565,43 @@ export class FacebookService {
 		const token = store.fbAdSpendToken;
 		const adAccountId = this.normalizeAccountId(store.fbAccountId);
 
-		// First, fetch campaign metadata
-		const campaignsUrl = `${this.BASE_URL}/${adAccountId}/campaigns`;
-		const campaignsParams = {
-			access_token: token,
-			fields: 'id,name,status,objective,daily_budget,lifetime_budget,start_time,stop_time',
-			limit: 500,
-		};
+		const timeRange = JSON.stringify({
+			since: from.toISOString().slice(0, 10),
+			until: to.toISOString().slice(0, 10),
+		});
 
-		this.logger.log(`Fetching campaigns metadata for ${store.name}`);
-		const campaignsData = await this.callFacebook(
-			campaignsUrl,
-			campaignsParams,
-		);
+		// Prepare batch requests
+		const batchRequests = [
+			{
+				method: 'GET',
+				relative_url: `${adAccountId}/campaigns?fields=id,name,status,objective,daily_budget,lifetime_budget,start_time,stop_time&limit=500`,
+			},
+			{
+				method: 'GET',
+				relative_url: `${adAccountId}/insights?level=campaign&fields=${this.getMetricFields()}&time_range=${encodeURIComponent(timeRange)}&limit=${limit}`,
+			},
+		];
 
-		if (
-			!campaignsData ||
-			!campaignsData.data ||
-			campaignsData.data.length === 0
-		) {
+		this.logger.log(`Fetching campaigns with batch API for ${store.name}`);
+
+		const batchResults = await this.callFacebookBatch(token, batchRequests);
+
+		// Parse batch responses
+		const campaignsResponse = JSON.parse(batchResults[0].body);
+		const insightsResponse = JSON.parse(batchResults[1].body);
+
+		if (!campaignsResponse.data || campaignsResponse.data.length === 0) {
 			this.logger.warn(`No campaigns found for ${store.name}`);
 			return [];
 		}
 
-		const campaigns = campaignsData.data.slice(0, limit);
+		const campaigns = campaignsResponse.data.slice(0, limit);
+		const insightsData = insightsResponse.data || [];
 
-		// Fetch insights at account level with campaign breakdown
-		const insights = (await this.fetchInsights(
-			store,
-			from,
-			to,
-			'campaign',
-			undefined,
-			undefined,
-			limit,
-		)) as InsightMetrics[];
+		// Process insights
+		const insights = this.processRegularInsights(insightsData, 'campaign');
 
-		// Create a map of campaign metadata
+		// Create metadata map
 		const campaignMetadataMap = new Map(
 			campaigns.map((c: any) => [
 				c.id,
@@ -624,42 +637,41 @@ export class FacebookService {
 		const token = store.fbAdSpendToken;
 		const adAccountId = this.normalizeAccountId(store.fbAccountId);
 
-		// Fetch adset metadata
-		const url = campaignId
-			? `${this.BASE_URL}/${campaignId}/adsets`
-			: `${this.BASE_URL}/${adAccountId}/adsets`;
+		const timeRange = JSON.stringify({
+			since: from.toISOString().slice(0, 10),
+			until: to.toISOString().slice(0, 10),
+		});
 
-		const params = {
-			access_token: token,
-			fields: 'id,name,status,campaign_id,daily_budget,lifetime_budget,start_time,end_time',
-			limit: 500,
-		};
+		const metadataUrl = campaignId
+			? `${campaignId}/adsets?fields=id,name,status,campaign_id,daily_budget,lifetime_budget,start_time,end_time&limit=500`
+			: `${adAccountId}/adsets?fields=id,name,status,campaign_id,daily_budget,lifetime_budget,start_time,end_time&limit=500`;
 
-		this.logger.log(
-			`Fetching ad sets metadata for ${store.name}${campaignId ? ` (campaign: ${campaignId})` : ''}`,
-		);
+		const insightsUrl = campaignId
+			? `${campaignId}/insights?level=adset&fields=${this.getMetricFields()}&time_range=${encodeURIComponent(timeRange)}&limit=${limit}`
+			: `${adAccountId}/insights?level=adset&fields=${this.getMetricFields()}&time_range=${encodeURIComponent(timeRange)}&limit=${limit}`;
 
-		const adSetsData = await this.callFacebook(url, params);
+		const batchRequests = [
+			{ method: 'GET', relative_url: metadataUrl },
+			{ method: 'GET', relative_url: insightsUrl },
+		];
 
-		if (!adSetsData || !adSetsData.data || adSetsData.data.length === 0) {
+		this.logger.log(`Fetching ad sets with batch API for ${store.name}`);
+
+		const batchResults = await this.callFacebookBatch(token, batchRequests);
+
+		const adSetsResponse = JSON.parse(batchResults[0].body);
+		const insightsResponse = JSON.parse(batchResults[1].body);
+
+		if (!adSetsResponse.data || adSetsResponse.data.length === 0) {
 			this.logger.warn(`No ad sets found for ${store.name}`);
 			return [];
 		}
 
-		const adSets = adSetsData.data.slice(0, limit);
+		const adSets = adSetsResponse.data.slice(0, limit);
+		const insightsData = insightsResponse.data || [];
 
-		// Fetch insights
-		const insights = (await this.fetchInsights(
-			store,
-			from,
-			to,
-			'adset',
-			undefined,
-			campaignId,
-			limit,
-		)) as InsightMetrics[];
+		const insights = this.processRegularInsights(insightsData, 'adset');
 
-		// Create metadata map
 		const adSetMetadataMap = new Map(
 			adSets.map((a: any) => [
 				a.id,
@@ -693,42 +705,43 @@ export class FacebookService {
 		const token = store.fbAdSpendToken;
 		const adAccountId = this.normalizeAccountId(store.fbAccountId);
 
-		// Fetch ads metadata
-		const url = adSetId
-			? `${this.BASE_URL}/${adSetId}/ads`
-			: `${this.BASE_URL}/${adAccountId}/ads`;
+		const timeRange = JSON.stringify({
+			since: from.toISOString().slice(0, 10),
+			until: to.toISOString().slice(0, 10),
+		});
 
-		const params = {
-			access_token: token,
-			fields: 'id,name,status,adset_id,campaign_id',
-			limit: 500,
-		};
+		const metadataUrl = adSetId
+			? `${adSetId}/ads?fields=id,name,status,adset_id,campaign_id&limit=500`
+			: `${adAccountId}/ads?fields=id,name,status,adset_id,campaign_id&limit=500`;
+
+		const insightsUrl = adSetId
+			? `${adSetId}/insights?level=ad&fields=${this.getMetricFields()}&time_range=${encodeURIComponent(timeRange)}&limit=${limit}`
+			: `${adAccountId}/insights?level=ad&fields=${this.getMetricFields()}&time_range=${encodeURIComponent(timeRange)}&limit=${limit}`;
+
+		const batchRequests = [
+			{ method: 'GET', relative_url: metadataUrl },
+			{ method: 'GET', relative_url: insightsUrl },
+		];
 
 		this.logger.log(
-			`Fetching ads metadata for ${store.name}${adSetId ? ` (ad set: ${adSetId})` : ''}`,
+			`Fetching ads with batch API for ${store.name}${adSetId ? ` (ad set: ${adSetId})` : ''}`,
 		);
 
-		const adsData = await this.callFacebook(url, params);
+		const batchResults = await this.callFacebookBatch(token, batchRequests);
 
-		if (!adsData || !adsData.data || adsData.data.length === 0) {
+		const adsResponse = JSON.parse(batchResults[0].body);
+		const insightsResponse = JSON.parse(batchResults[1].body);
+
+		if (!adsResponse.data || adsResponse.data.length === 0) {
 			this.logger.warn(`No ads found for ${store.name}`);
 			return [];
 		}
 
-		const ads = adsData.data.slice(0, limit);
+		const ads = adsResponse.data.slice(0, limit);
+		const insightsData = insightsResponse.data || [];
 
-		// Fetch insights
-		const insights = (await this.fetchInsights(
-			store,
-			from,
-			to,
-			'ad',
-			undefined,
-			adSetId,
-			limit,
-		)) as InsightMetrics[];
+		const insights = this.processRegularInsights(insightsData, 'ad');
 
-		// Create metadata map
 		const adMetadataMap = new Map(
 			ads.map((a: any) => [
 				a.id,
