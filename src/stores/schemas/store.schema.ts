@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
-import { Document } from 'mongoose';
+import { Document, Types } from 'mongoose';
+import { StoreStatus } from 'src/common/enums/store-status.enum';
 
 @Schema({ timestamps: true })
 export class Store extends Document {
@@ -20,6 +21,15 @@ export class Store extends Document {
 
 	@Prop({ required: true })
 	fbAccountId: string;
+
+	@Prop({ type: String, enum: StoreStatus, default: StoreStatus.PENDING })
+	status: StoreStatus;
+
+	@Prop({ type: Types.ObjectId, ref: 'User', required: true })
+	createdBy: Types.ObjectId;
+
+	@Prop({ type: String })
+	rejectionReason?: string;
 
 	createdAt: Date;
 	updatedAt: Date;

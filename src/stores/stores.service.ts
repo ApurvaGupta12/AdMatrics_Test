@@ -15,6 +15,8 @@ import { MetricsService } from '../metrics/metrics.service';
 import { UserRole } from '../common/enums/user-role.enum';
 import { AuditService } from 'src/audit/audit.service';
 import { AuditAction, AuditStatus } from 'src/audit/schemas/audit-log.schema';
+import { StoreStatus } from 'src/common/enums/store-status.enum';
+import { MailService } from 'src/mail/mail.service';
 
 @Injectable()
 export class StoresService {
@@ -23,17 +25,44 @@ export class StoresService {
 		private readonly storeModel: Model<Store>,
 		@Inject(forwardRef(() => MetricsService))
 		private readonly metricsService: MetricsService,
+		private readonly mailService: MailService,
 		private readonly auditService: AuditService,
 	) {}
 
-	async create(dto: CreateStoreDto): Promise<Store> {
-		const store = new this.storeModel(dto);
+	async create(
+		dto: CreateStoreDto,
+		userId: string,
+		userRole: UserRole,
+	): Promise<Store> {
+		// Check if store with this name already exists
+		const existingStore = await this.findByName(dto.name);
+		if (existingStore) {
+			throw new ConflictException('Store name already exists');
+		}
+
+		const status =
+			userRole === UserRole.ADMIN
+				? StoreStatus.ACTIVE
+				: StoreStatus.PENDING;
+
+		const store = new this.storeModel({
+			...dto,
+			createdBy: new Types.ObjectId(userId),
+			status,
+		});
 
 		await this.auditService.log({
 			action: AuditAction.STORE_CREATED,
 			status: AuditStatus.SUCCESS,
-			metadata: { storeName: dto.name },
+			userId,
+			storeId: store._id.toString(),
+			metadata: {
+				storeName: dto.name,
+				storeStatus: status,
+				createdByRole: userRole,
+			},
 		});
+
 		return store.save();
 	}
 
@@ -42,8 +71,18 @@ export class StoresService {
 	}
 
 	async findAll(user?: any): Promise<Store[]> {
-		if (!user || user.role === 'ADMIN' || user.role === UserRole.ADMIN) {
-			return this.storeModel.find().exec();
+		const filter: any = {};
+
+		// Admins see all stores, others only see ACTIVE stores
+		if (!user || user.role !== UserRole.ADMIN) {
+			filter.status = StoreStatus.ACTIVE;
+		}
+
+		if (!user || user.role === UserRole.ADMIN) {
+			return this.storeModel
+				.find(filter)
+				.populate('createdBy', 'name email')
+				.exec();
 		}
 
 		const assigned = (user.assignedStores || []).map((id: any) =>
@@ -52,14 +91,19 @@ export class StoresService {
 
 		if (!assigned.length) return [];
 
+		filter._id = { $in: assigned.map((id) => new Types.ObjectId(id)) };
+
 		return this.storeModel
-			.find({
-				_id: { $in: assigned.map((id) => new Types.ObjectId(id)) },
-			})
+			.find(filter)
+			.populate('createdBy', 'name email')
 			.exec();
 	}
 
 	async findOne(id: string): Promise<Store> {
+		if (!Types.ObjectId.isValid(id)) {
+			throw new NotFoundException('Store not found');
+		}
+
 		const store = await this.storeModel.findById(id).exec();
 		if (!store) throw new NotFoundException('Store not found');
 		return store;
@@ -74,6 +118,82 @@ export class StoresService {
 				'You do not have access to this store',
 			);
 		}
+		return store;
+	}
+
+	async findPendingStores(): Promise<Store[]> {
+		return this.storeModel
+			.find({ status: StoreStatus.PENDING })
+			.populate('createdBy', 'name email')
+			.exec();
+	}
+
+	async approveStore(storeId: string, adminId: string): Promise<Store> {
+		const store = await this.storeModel
+			.findByIdAndUpdate(
+				storeId,
+				{
+					status: StoreStatus.ACTIVE,
+					$unset: { rejectionReason: 1 },
+				},
+				{ new: true },
+			)
+			.populate('createdBy', 'name email')
+			.exec();
+
+		if (!store) {
+			throw new NotFoundException('Store not found');
+		}
+
+		await this.auditService.log({
+			action: AuditAction.STORE_UPDATED,
+			status: AuditStatus.SUCCESS,
+			userId: adminId,
+			storeId: store._id.toString(),
+			metadata: {
+				action: 'APPROVED',
+				storeName: store.name,
+				approvedBy: adminId,
+			},
+		});
+
+		return store;
+	}
+
+	async rejectStore(
+		storeId: string,
+		adminId: string,
+		rejectionReason: string,
+	): Promise<Store> {
+		const store = await this.storeModel
+			.findByIdAndUpdate(
+				storeId,
+				{
+					status: StoreStatus.REJECTED,
+					rejectionReason,
+				},
+				{ new: true },
+			)
+			.populate('createdBy', 'name email')
+			.exec();
+
+		if (!store) {
+			throw new NotFoundException('Store not found');
+		}
+
+		await this.auditService.log({
+			action: AuditAction.STORE_UPDATED,
+			status: AuditStatus.SUCCESS,
+			userId: adminId,
+			storeId: store._id.toString(),
+			metadata: {
+				action: 'REJECTED',
+				storeName: store.name,
+				rejectedBy: adminId,
+				rejectionReason,
+			},
+		});
+
 		return store;
 	}
 

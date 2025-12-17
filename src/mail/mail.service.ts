@@ -287,6 +287,71 @@ export class MailService {
 		}
 	}
 
+	async sendStoreApprovalEmail(
+		email: string,
+		managerName: string,
+		storeName: string,
+	): Promise<void> {
+		if (!this.transporter) {
+			this.logger.warn(
+				'Mail transporter not initialized. Skipping email.',
+			);
+			return;
+		}
+
+		const frontendUrl =
+			this.configService.get<string>('FRONTEND_URL') || '';
+		const subject = `Store Approved - ${storeName} | Ad Matrix`;
+		const html = this.generateStoreApprovalTemplate(
+			managerName,
+			storeName,
+			frontendUrl,
+		);
+
+		try {
+			await this.transporter.sendMail({ to: email, subject, html });
+			this.logger.log(`✓ Store approval email sent to ${email}`);
+		} catch (error) {
+			this.logger.error(
+				`✗ Failed to send store approval email to ${email}:`,
+				error,
+			);
+			throw error;
+		}
+	}
+
+	async sendStoreRejectionEmail(
+		email: string,
+		managerName: string,
+		storeName: string,
+		rejectionReason: string,
+	): Promise<void> {
+		if (!this.transporter) {
+			this.logger.warn(
+				'Mail transporter not initialized. Skipping email.',
+			);
+			return;
+		}
+
+		const subject = `Store Submission Update - ${storeName} | Ad Matrix`;
+		const html = this.generateStoreRejectionTemplate(
+			managerName,
+			storeName,
+			rejectionReason,
+		);
+
+		try {
+			await this.transporter.sendMail({ to: email, subject, html });
+			this.logger.log(`✓ Store rejection email sent to ${email}`);
+		} catch (error) {
+			this.logger.error(
+				`✗ Failed to send store rejection email to ${email}:`,
+				error,
+			);
+			throw error;
+		}
+	}
+
 	private generateOtpEmailTemplate(name: string, otp: string): string {
 		return `
             <!DOCTYPE html>
@@ -1125,5 +1190,152 @@ export class MailService {
             </body>
             </html>
 	    `;
+	}
+
+	private generateStoreApprovalTemplate(
+		managerName: string,
+		storeName: string,
+		frontendUrl: string,
+	): string {
+		return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
+                    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                    .header { background: #10b981; padding: 40px 30px; text-align: center; color: #ffffff; }
+                    .header h1 { margin: 0 0 10px 0; font-size: 32px; font-weight: 600; }
+                    .header p { margin: 0; font-size: 16px; opacity: 0.9; }
+                    .content { padding: 40px 30px; }
+                    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; font-weight: 600; }
+                    .message { font-size: 16px; color: #555555; line-height: 1.8; margin-bottom: 25px; }
+                    .store-info { background-color: #f0fdf4; border-left: 4px solid #10b981; padding: 20px; margin: 25px 0; border-radius: 4px; }
+                    .store-info strong { color: #10b981; font-size: 18px; }
+                    .cta-button { display: inline-block; background: #10b981; color: #ffffff !important; text-decoration: none; padding: 15px 40px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 20px 0; }
+                    .footer { background-color: #f8f9fa; padding: 20px 30px; text-align: center; font-size: 14px; color: #666666; border-top: 1px solid #e0e0e0; }
+                    .footer a { color: #667eea; text-decoration: none; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>✓ Store Approved!</h1>
+                        <p>Your store has been activated</p>
+                    </div>
+                    <div class="content">
+                        <div class="greeting">Hi ${managerName},</div>
+                        <div class="message">
+                            Great news! Your store <strong>${storeName}</strong> has been approved by our admin team and is now active on Ad Matrix.
+                        </div>
+                        <div class="store-info">
+                            <strong>Store Name:</strong> ${storeName}<br/>
+                            <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                                Status: <span style="color: #10b981; font-weight: 600;">ACTIVE</span>
+                            </div>
+                        </div>
+                        <div class="message">
+                            You can now:
+                            <ul style="padding-left: 20px; margin-top: 15px;">
+                                <li style="margin-bottom: 10px;">Access your store dashboard</li>
+                                <li style="margin-bottom: 10px;">Sync product analytics</li>
+                                <li style="margin-bottom: 10px;">Track traffic metrics</li>
+                                <li style="margin-bottom: 10px;">Monitor ad spend and performance</li>
+                            </ul>
+                        </div>
+                        <center>
+                            <a href="${frontendUrl}/stores/${storeName}" class="cta-button">View Store Dashboard</a>
+                        </center>
+                    </div>
+                    <div class="footer">
+                        <p>Questions? Contact us at <a href="mailto:ashutosh@codetocouture.com">ashutosh@codetocouture.com</a></p>
+                        <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
+	}
+
+	private generateStoreRejectionTemplate(
+		managerName: string,
+		storeName: string,
+		rejectionReason: string,
+	): string {
+		const frontendUrl =
+			this.configService.get<string>('FRONTEND_URL') || '';
+
+		return `
+            <!DOCTYPE html>
+            <html>
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #f4f4f4; margin: 0; padding: 0; }
+                    .container { max-width: 600px; margin: 40px auto; background-color: #ffffff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+                    .header { background: #dc2626; padding: 40px 30px; text-align: center; color: #ffffff; }
+                    .header h1 { margin: 0 0 10px 0; font-size: 32px; font-weight: 600; }
+                    .header p { margin: 0; font-size: 16px; opacity: 0.9; }
+                    .content { padding: 40px 30px; }
+                    .greeting { font-size: 20px; color: #333333; margin-bottom: 20px; font-weight: 600; }
+                    .message { font-size: 16px; color: #555555; line-height: 1.8; margin-bottom: 25px; }
+                    .store-info { background-color: #fef2f2; border-left: 4px solid #dc2626; padding: 20px; margin: 25px 0; border-radius: 4px; }
+                    .store-info strong { color: #dc2626; font-size: 18px; }
+                    .reason-box { background-color: #fff7ed; border-left: 4px solid #f59e0b; padding: 15px; margin: 20px 0; border-radius: 4px; }
+                    .reason-box strong { color: #f59e0b; }
+                    .cta-button { display: inline-block; background: #2563EB; color: #ffffff !important; text-decoration: none; padding: 15px 40px; border-radius: 6px; font-weight: 600; font-size: 16px; margin: 20px 0; }
+                    .footer { background-color: #f8f9fa; padding: 20px 30px; text-align: center; font-size: 14px; color: #666666; border-top: 1px solid #e0e0e0; }
+                    .footer a { color: #667eea; text-decoration: none; }
+                </style>
+            </head>
+            <body>
+                <div class="container">
+                    <div class="header">
+                        <h1>Store Review</h1>
+                        <p>Action required for your store submission</p>
+                    </div>
+                    <div class="content">
+                        <div class="greeting">Hi ${managerName},</div>
+                        <div class="message">
+                            Thank you for submitting <strong>${storeName}</strong> to Ad Matrix. After reviewing your submission, we're unable to approve it at this time.
+                        </div>
+                        <div class="store-info">
+                            <strong>Store Name:</strong> ${storeName}<br/>
+                            <div style="margin-top: 10px; font-size: 14px; color: #666;">
+                                Status: <span style="color: #dc2626; font-weight: 600;">REJECTED</span>
+                            </div>
+                        </div>
+                        <div class="reason-box">
+                            <strong>⚠️ Reason:</strong><br/>
+                            <div style="margin-top: 10px; color: #78350f;">
+                                ${rejectionReason}
+                            </div>
+                        </div>
+                        <div class="message">
+                            <strong>Next Steps:</strong>
+                            <ul style="padding-left: 20px; margin-top: 15px;">
+                                <li style="margin-bottom: 10px;">Review the reason above</li>
+                                <li style="margin-bottom: 10px;">Make the necessary corrections</li>
+                                <li style="margin-bottom: 10px;">Submit your store again with updated information</li>
+                            </ul>
+                        </div>
+                        <center>
+                            <a href="${frontendUrl}/stores/create" class="cta-button">Submit Store Again</a>
+                        </center>
+                        <div class="message" style="margin-top: 30px; font-size: 14px;">
+                            If you have questions about this decision or need clarification, please don't hesitate to contact our support team.
+                        </div>
+                    </div>
+                    <div class="footer">
+                        <p>Need help? Contact us at <a href="mailto:ashutosh@codetocouture.com">ashutosh@codetocouture.com</a></p>
+                        <p>&copy; ${new Date().getFullYear()} Ad Matrix. All rights reserved.</p>
+                    </div>
+                </div>
+            </body>
+            </html>
+        `;
 	}
 }
