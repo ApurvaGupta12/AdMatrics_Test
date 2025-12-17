@@ -25,6 +25,8 @@ import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 import { UserRole } from '../common/enums/user-role.enum';
 import { StoreAccessGuard } from '../auth/guards/store-access.guard';
+import { RejectStoreDto } from './dto/reject-store.dto';
+import { ApproveStoreDto } from './dto/approve-store.dto';
 
 @ApiTags('Stores')
 @ApiBearerAuth('JWT-auth')
@@ -43,24 +45,17 @@ export class StoresController {
 		return this.storesService.findAll(req.user);
 	}
 
-	@Get(':storeId')
-	@UseGuards(StoreAccessGuard)
-	@ApiOperation({ summary: 'Get a store by ID' })
-	@ApiParam({ name: 'storeId', description: 'Store ID' })
-	@ApiResponse({ status: 200, description: 'Store found' })
-	@ApiResponse({ status: 404, description: 'Store not found' })
-	@ApiResponse({ status: 403, description: 'Forbidden' })
-	async findOne(@Param('storeId') storeId: string, @Req() req: any) {
-		return this.storesService.findOneForUser(storeId, req.user);
-	}
-
 	@Post()
 	@Roles(UserRole.ADMIN, UserRole.MANAGER)
 	@ApiOperation({ summary: 'Create a new store (Admin/Manager only)' })
 	@ApiResponse({ status: 201, description: 'Store created successfully' })
 	@ApiResponse({ status: 409, description: 'Store name already exists' })
 	async create(@Body() dto: CreateStoreDto, @Req() req: any) {
-		const store = await this.storesService.create(dto);
+		const store = await this.storesService.create(
+			dto,
+			req.user.userId,
+			req.user.role,
+		);
 
 		if (req.user.role === UserRole.MANAGER) {
 			await this.usersService.assignStores(req.user.userId, [
@@ -70,6 +65,28 @@ export class StoresController {
 
 		const obj = store.toObject();
 		return obj;
+	}
+
+	@Get('pending')
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Get all pending stores (Admin only)' })
+	@ApiResponse({
+		status: 200,
+		description: 'Pending stores retrieved successfully',
+	})
+	async getPendingStores() {
+		return this.storesService.findPendingStores();
+	}
+
+	@Get(':storeId')
+	@UseGuards(StoreAccessGuard)
+	@ApiOperation({ summary: 'Get a store by ID' })
+	@ApiParam({ name: 'storeId', description: 'Store ID' })
+	@ApiResponse({ status: 200, description: 'Store found' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
+	@ApiResponse({ status: 403, description: 'Forbidden' })
+	async findOne(@Param('storeId') storeId: string, @Req() req: any) {
+		return this.storesService.findOneForUser(storeId, req.user);
 	}
 
 	@Patch(':storeId')
@@ -101,5 +118,67 @@ export class StoresController {
 	async remove(@Param('storeId') storeId: string) {
 		await this.storesService.remove(storeId);
 		return { statusCode: 204 };
+	}
+
+	@Post(':storeId/approve')
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Approve a pending store (Admin only)' })
+	@ApiParam({ name: 'storeId', description: 'Store ID' })
+	@ApiResponse({ status: 200, description: 'Store approved successfully' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
+	async approveStore(
+		@Param('storeId') storeId: string,
+		@Body() dto: ApproveStoreDto,
+		@Req() req: any,
+	) {
+		const store = await this.storesService.approveStore(
+			storeId,
+			req.user.userId,
+		);
+
+		const creator = store.createdBy as any;
+		if (creator && creator.email) {
+			this.storesService['mailService']
+				.sendStoreApprovalEmail(creator.email, creator.name, store.name)
+				.catch((err) =>
+					console.error('Failed to send approval email:', err),
+				);
+		}
+
+		return store;
+	}
+
+	@Post(':storeId/reject')
+	@Roles(UserRole.ADMIN)
+	@ApiOperation({ summary: 'Reject a pending store (Admin only)' })
+	@ApiParam({ name: 'storeId', description: 'Store ID' })
+	@ApiResponse({ status: 200, description: 'Store rejected successfully' })
+	@ApiResponse({ status: 404, description: 'Store not found' })
+	async rejectStore(
+		@Param('storeId') storeId: string,
+		@Body() dto: RejectStoreDto,
+		@Req() req: any,
+	) {
+		const store = await this.storesService.rejectStore(
+			storeId,
+			req.user.userId,
+			dto.rejectionReason,
+		);
+
+		const creator = store.createdBy as any;
+		if (creator && creator.email) {
+			this.storesService['mailService']
+				.sendStoreRejectionEmail(
+					creator.email,
+					creator.name,
+					store.name,
+					dto.rejectionReason,
+				)
+				.catch((err) =>
+					console.error('Failed to send rejection email:', err),
+				);
+		}
+
+		return store;
 	}
 }
