@@ -65,17 +65,32 @@ export class ShopifyService {
 		}
 	}
 
-	private toISTString(date: Date): string {
-		const istOffset = 5.5 * 60 * 60 * 1000;
-		const istDate = new Date(date.getTime() + istOffset);
-		return istDate.toISOString().replace('Z', '+05:30');
+	private getISTDateString(date: Date): string {
+		// Convert to IST (UTC+5:30)
+		const istDate = new Date(date.getTime() + 5.5 * 60 * 60 * 1000);
+		const year = istDate.getUTCFullYear();
+		const month = String(istDate.getUTCMonth() + 1).padStart(2, '0');
+		const day = String(istDate.getUTCDate()).padStart(2, '0');
+		return `${year}-${month}-${day}`;
 	}
 
-	private getUTCDateString(date: Date): string {
-		const year = date.getUTCFullYear();
-		const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-		const day = String(date.getUTCDate()).padStart(2, '0');
-		return `${year}-${month}-${day}`;
+	private getOrderDateKeyIST(orderCreatedAt: string): string {
+		const orderDate = new Date(orderCreatedAt);
+		return this.getISTDateString(orderDate);
+	}
+
+	private getISTDateBoundaries(date: Date): { start: Date; end: Date } {
+		// Get the date string in IST (e.g., "2025-12-29")
+		const dateStr = this.getISTDateString(date);
+
+		// Parse as UTC midnight, then adjust to IST boundaries
+		// Start: 2025-12-29 00:00:00 IST = 2025-12-28 18:30:00 UTC
+		const startIST = new Date(`${dateStr}T00:00:00+05:30`);
+
+		// End: 2025-12-29 23:59:59.999 IST = 2025-12-29 18:29:59.999 UTC
+		const endIST = new Date(`${dateStr}T23:59:59.999+05:30`);
+
+		return { start: startIST, end: endIST };
 	}
 
 	private getOrdersQuery(): string {
@@ -119,13 +134,15 @@ export class ShopifyService {
 		try {
 			const startTime = Date.now();
 
-			// Log with both UTC and IST for debugging
+			const fromBoundaries = this.getISTDateBoundaries(from);
+			const toBoundaries = this.getISTDateBoundaries(to);
+
 			this.logger.log(
-				`[TIMEZONE DEBUG] fetchOrders called with:
-				- from (UTC): ${from.toISOString()}
-				- to (UTC): ${to.toISOString()}
-				- from (IST): ${this.toISTString(from)}
-				- to (IST): ${this.toISTString(to)}`,
+				`[FIXED] Fetching orders for ${store.name}:
+				- Input from (IST): ${this.getISTDateString(from)}
+				- Input to (IST): ${this.getISTDateString(to)}
+				- Query from (UTC): ${fromBoundaries.start.toISOString()}
+				- Query to (UTC): ${toBoundaries.end.toISOString()}`,
 			);
 
 			await this.auditService.log({
@@ -134,10 +151,10 @@ export class ShopifyService {
 				storeId: store._id.toString(),
 				storeName: store.name,
 				metadata: {
-					from: from.toISOString(),
-					to: to.toISOString(),
-					fromIST: this.toISTString(from),
-					toIST: this.toISTString(to),
+					fromIST: this.getISTDateString(from),
+					toIST: this.getISTDateString(to),
+					fromUTC: fromBoundaries.start.toISOString(),
+					toUTC: toBoundaries.end.toISOString(),
 				},
 			});
 
@@ -146,14 +163,8 @@ export class ShopifyService {
 					(to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24),
 				) + 1;
 
-			this.logger.log(
-				`Fetching Shopify orders for ${store.name}: ${from.toISOString().slice(0, 10)} to ${to.toISOString().slice(0, 10)} (${totalDays} days)`,
-			);
-
-			// Query ALL orders in the date range at once
-			// Use ISO string format which Shopify understands
-			const fromISO = from.toISOString();
-			const toISO = to.toISOString();
+			const fromISO = fromBoundaries.start.toISOString();
+			const toISO = toBoundaries.end.toISOString();
 			const queryString = `created_at:>='${fromISO}' AND created_at:<='${toISO}'`;
 
 			this.logger.debug(`Shopify query: ${queryString}`);
@@ -173,12 +184,8 @@ export class ShopifyService {
 				const orders = data.orders.edges;
 
 				for (const order of orders) {
-					// Group by day in-memory using UTC date
-					const orderDate = new Date(order.node.createdAt);
-					const dateKey = this.getUTCDateString(orderDate);
-
-					this.logger.debug(
-						`Order ${order.node.id}: createdAt=${order.node.createdAt}, dateKey=${dateKey}`,
+					const dateKey = this.getOrderDateKeyIST(
+						order.node.createdAt,
 					);
 
 					if (!ordersMap.has(dateKey)) {
@@ -213,6 +220,25 @@ export class ShopifyService {
 				}
 			}
 
+			const currentDate = new Date(from);
+			const endDate = new Date(to);
+
+			while (currentDate <= endDate) {
+				const dateKey = this.getISTDateString(currentDate);
+				if (!ordersMap.has(dateKey)) {
+					ordersMap.set(dateKey, {
+						date: dateKey,
+						soldOrders: 0,
+						orderValue: 0,
+						soldItems: 0,
+					});
+					this.logger.debug(
+						`No orders for ${dateKey}, initializing with zeros`,
+					);
+				}
+				currentDate.setDate(currentDate.getDate() + 1);
+			}
+
 			// Convert map to sorted array
 			const results = Array.from(ordersMap.values()).sort((a, b) =>
 				a.date.localeCompare(b.date),
@@ -227,6 +253,9 @@ export class ShopifyService {
 				this.logger.log(
 					`Date range in results: ${results[0].date} to ${results[results.length - 1].date}`,
 				);
+				this.logger.log(
+					`Days with orders: ${results.filter((r) => r.soldOrders > 0).length}, Days with zeros: ${results.filter((r) => r.soldOrders === 0).length}`,
+				);
 			}
 
 			await this.auditService.log({
@@ -239,6 +268,10 @@ export class ShopifyService {
 					daysProcessed: results.length,
 					totalDays,
 					totalOrders: processedOrders,
+					daysWithOrders: results.filter((r) => r.soldOrders > 0)
+						.length,
+					daysWithZeros: results.filter((r) => r.soldOrders === 0)
+						.length,
 					dateRange:
 						results.length > 0
 							? `${results[0].date} to ${results[results.length - 1].date}`
@@ -280,8 +313,10 @@ export class ShopifyService {
 
 			let queryString = '';
 			if (from && to) {
-				const fromISO = from.toISOString();
-				const toISO = to.toISOString();
+				const fromBoundaries = this.getISTDateBoundaries(from);
+				const toBoundaries = this.getISTDateBoundaries(to);
+				const fromISO = fromBoundaries.start.toISOString();
+				const toISO = toBoundaries.end.toISOString();
 				queryString = `created_at:>='${fromISO}' AND created_at:<='${toISO}'`;
 			}
 
@@ -291,7 +326,7 @@ export class ShopifyService {
 
 			const dateRangeLog =
 				from && to
-					? `${from.toISOString().slice(0, 10)} to ${to.toISOString().slice(0, 10)}`
+					? `${this.getISTDateString(from)} to ${this.getISTDateString(to)}`
 					: 'all-time';
 
 			this.logger.log(
