@@ -18,23 +18,11 @@ export class SyncMetricsJob {
 		private readonly googleService: GoogleService,
 	) {}
 
-	private getYesterdayInIST(): Date {
-		// Get current time in IST
-		const now = new Date();
-		const istDateString = now.toLocaleString('en-US', {
-			timeZone: 'Asia/Kolkata',
-		});
-		const istNow = new Date(istDateString);
-
-		// Get yesterday in IST
-		const yesterdayIST = new Date(istNow);
-		yesterdayIST.setDate(yesterdayIST.getDate() - 1);
-		yesterdayIST.setHours(0, 0, 0, 0);
-
-		this.logger.log(`Current IST time: ${istDateString}`);
-		this.logger.log(`Yesterday IST (start): ${yesterdayIST.toISOString()}`);
-
-		return yesterdayIST;
+	private getYesterdayIST(): Date {
+		const yesterday = new Date();
+		yesterday.setDate(yesterday.getDate() - 1);
+		yesterday.setHours(0, 0, 0, 0);
+		return yesterday;
 	}
 
 	@Cron(CronExpression.EVERY_DAY_AT_2AM)
@@ -44,13 +32,9 @@ export class SyncMetricsJob {
 		const stores = await this.storesService.findAll();
 
 		// Get yesterday in IST timezone
-		const yesterday = this.getYesterdayInIST();
-		const yesterdayEnd = new Date(yesterday);
-		yesterdayEnd.setHours(23, 59, 59, 999);
+		const yesterday = this.getYesterdayIST();
 
-		this.logger.log(
-			`Syncing data for date: ${yesterday.toISOString().slice(0, 10)} (IST)`,
-		);
+		this.logger.log(`Syncing data for yesterday in IST`);
 
 		for (const store of stores) {
 			try {
@@ -60,17 +44,17 @@ export class SyncMetricsJob {
 					this.shopifyService.fetchOrders(
 						store,
 						yesterday,
-						yesterdayEnd,
+						yesterday,
 					),
 					this.facebookService.fetchAdSpend(
 						store,
 						yesterday,
-						yesterdayEnd,
+						yesterday,
 					),
 					this.googleService.fetchAdSpend(
 						store,
 						yesterday,
-						yesterdayEnd,
+						yesterday,
 					),
 				]);
 
@@ -115,9 +99,11 @@ export class SyncMetricsJob {
 						const entry = getOrCreateEntry(row.date);
 						entry.googleAdSpend = row.spend;
 					});
-				} else if (typeof googleSpend === 'number') {
-					const dateStr = yesterday.toISOString().slice(0, 10);
-					const entry = getOrCreateEntry(dateStr);
+				} else if (
+					typeof googleSpend === 'number' &&
+					shopifyData.length > 0
+				) {
+					const entry = getOrCreateEntry(shopifyData[0].date);
 					entry.googleAdSpend = googleSpend;
 				}
 
